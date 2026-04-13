@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestão de Zaps - Medusa v4.0</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030;}
+        .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+        h1 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 0; }
+        .btn { background-color: #25D366; color: white; border: none; padding: 10px 20px; font-size: 14px; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s;}
+        .btn:hover { background-color: #128C7E; }
+        .btn:disabled { background-color: #ccc; cursor: not-allowed; }
+        .btn-secondary { background-color: #34b7f1; }
+        .btn-warmup { background-color: #ff6f00; }
+        .btn-danger { background-color: #d32f2f; }
+        .zap-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }
+        .zap-card { background: #f9f9f9; border: 1px solid #ddd; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .zap-card h3 { margin: 0 0 10px; color: #075e54; }
+        .status-badge { display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 12px; font-weight: bold; margin: 10px 0; }
+        .status-online { background-color: #dcf8c6; color: #075e54; }
+        .status-offline { background-color: #ffebee; color: #d32f2f; }
+        .btn-group { display: flex; gap: 10px; margin-top: 10px; }
+        .btn-group .btn { flex: 1; padding: 8px; font-size: 12px; }
+        .section { margin-bottom: 30px; padding: 20px; background: #f9f9f9; border-radius: 8px; border: 1px solid #ddd; }
+        .info-box { background-color: #dcf8c6; padding: 15px; border-radius: 5px; margin-top: 15px; border-left: 5px solid #25D366; }
+        .nav { display: flex; gap: 10px; margin-bottom: 20px; }
+        .nav a { padding: 10px 20px; background: #f0f0f0; border-radius: 5px; text-decoration: none; color: #075e54; font-weight: bold; }
+        .nav a:hover { background: #e0e0e0; }
+        .warmup-controls { display: flex; gap: 10px; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 Gestão de Zaps (1-24) - v4.0</h1>
+        
+        <div class="nav">
+            <a href="index.html">← Voltar ao Painel</a>
+        </div>
+
+        <div class="section">
+            <h2>Status dos Zaps</h2>
+            <button class="btn btn-secondary" onclick="refreshStatus()">🔄 Atualizar Status</button>
+            <div class="zap-list" id="zapsList"></div>
+        </div>
+
+        <div class="section">
+            <h2>Aquecimento de Chips</h2>
+            <p>Selecione os Zaps que deseja aquecer (mínimo 2):</p>
+            <div class="zap-list" id="warmupCheckboxes"></div>
+            <div class="warmup-controls">
+                <button id="btnStartWarmup" class="btn btn-warmup" style="flex: 2;" onclick="startWarmup()">🔥 Iniciar Aquecimento</button>
+                <button id="btnStopWarmup" class="btn btn-danger" style="flex: 1;" onclick="stopWarmup()" disabled>🛑 Parar</button>
+            </div>
+            <div id="warmupResult" class="info-box" style="display: none; margin-top: 15px;"></div>
+        </div>
+
+        <div class="section">
+            <h2>Manutenção</h2>
+            <div class="btn-group">
+                <button class="btn btn-secondary" onclick="checkDevices()">📱 Status ADB</button>
+                <button class="btn btn-danger" onclick="clearAllCache()">🧹 Limpar Cache</button>
+            </div>
+            <div id="maintenanceResult" class="info-box" style="display: none; margin-top: 15px;"></div>
+        </div>
+    </div>
+
+    <script>
+        let isWarmupActive = false;
+
+        async function refreshStatus() {
+            try {
+                const res = await fetch('/api/zaps-status');
+                const data = await res.json();
+                const zapsList = document.getElementById('zapsList');
+                zapsList.innerHTML = '';
+                
+                data.forEach(zap => {
+                    const card = document.createElement('div');
+                    card.className = 'zap-card';
+                    const statusClass = zap.connected ? 'status-online' : 'status-offline';
+                    const statusText = zap.connected ? '✅ Ativo' : '❌ Inativo';
+                    
+                    card.innerHTML = `
+                        <h3>${zap.accountId}</h3>
+                        <div class="status-badge ${statusClass}">${statusText}</div>
+                        <div class="btn-group">
+                            <button class="btn btn-secondary" onclick="connectZap('${zap.accountId}')">Conectar</button>
+                        </div>
+                    `;
+                    zapsList.appendChild(card);
+                });
+            } catch (error) {
+                console.error('Erro ao atualizar status:', error);
+            }
+        }
+
+        async function connectZap(accountId) {
+            alert(`Conectando ${accountId}. Verifique o terminal do Node.js para o QR Code!`);
+            try {
+                await fetch('/api/whatsapp/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accountId })
+                });
+                setTimeout(refreshStatus, 2000);
+            } catch (error) {
+                alert('Erro ao conectar.');
+            }
+        }
+
+        function populateWarmupCheckboxes() {
+            const container = document.getElementById('warmupCheckboxes');
+            container.innerHTML = '';
+            for (let i = 1; i <= 24; i++) {
+                const num = i.toString().padStart(2, '0');
+                const id = `WA-${num}`;
+                const label = document.createElement('label');
+                label.style.display = 'flex';
+                label.style.alignItems = 'center';
+                label.style.padding = '10px';
+                label.style.background = '#fff';
+                label.style.border = '1px solid #ccc';
+                label.style.borderRadius = '5px';
+                label.style.cursor = 'pointer';
+                label.innerHTML = `<input type="checkbox" class="warmup-cb" value="${id}" style="margin-right: 10px;"> <span>${id}</span>`;
+                container.appendChild(label);
+            }
+        }
+
+        async function startWarmup() {
+            const selected = Array.from(document.querySelectorAll('.warmup-cb:checked')).map(cb => cb.value);
+            if (selected.length < 2) {
+                alert('Selecione pelo menos 2 Zaps para aquecimento.');
+                return;
+            }
+
+            const btnStart = document.getElementById('btnStartWarmup');
+            const btnStop = document.getElementById('btnStopWarmup');
+            
+            btnStart.innerHTML = '⏳ Aquecendo...';
+            btnStart.disabled = true;
+            btnStop.disabled = false;
+            isWarmupActive = true;
+
+            try {
+                const res = await fetch('/api/warmup-chips/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accounts: JSON.stringify(selected) })
+                });
+                const data = await res.json();
+                document.getElementById('warmupResult').style.display = 'block';
+                document.getElementById('warmupResult').innerText = data.message || data.error;
+            } catch (error) {
+                document.getElementById('warmupResult').style.display = 'block';
+                document.getElementById('warmupResult').innerText = 'Erro ao iniciar aquecimento.';
+                btnStart.innerHTML = '🔥 Iniciar Aquecimento';
+                btnStart.disabled = false;
+                btnStop.disabled = true;
+                isWarmupActive = false;
+            }
+        }
+
+        async function stopWarmup() {
+            const btnStart = document.getElementById('btnStartWarmup');
+            const btnStop = document.getElementById('btnStopWarmup');
+            
+            try {
+                const res = await fetch('/api/warmup-chips/stop', { method: 'POST' });
+                const data = await res.json();
+                document.getElementById('warmupResult').innerText = data.message || 'Aquecimento parado.';
+            } catch (error) {
+                alert('Erro ao parar aquecimento.');
+            } finally {
+                btnStart.innerHTML = '🔥 Iniciar Aquecimento';
+                btnStart.disabled = false;
+                btnStop.disabled = true;
+                isWarmupActive = false;
+            }
+        }
+
+        async function checkDevices() {
+            try {
+                const res = await fetch('/api/devices-status');
+                const data = await res.json();
+                document.getElementById('maintenanceResult').style.display = 'block';
+                if (data.available) {
+                    let html = '<strong>Status dos Dispositivos ADB:</strong><br>';
+                    data.devices.forEach(device => {
+                        const icon = device.connected ? '✅' : '❌';
+                        html += `${icon} Porta ${device.port} - ${device.deviceId}: ${device.connected ? 'Conectado' : 'Desconectado'}<br>`;
+                    });
+                    document.getElementById('maintenanceResult').innerHTML = html;
+                } else {
+                    document.getElementById('maintenanceResult').innerText = '⚠️ ADB não está disponível.';
+                }
+            } catch (error) {
+                document.getElementById('maintenanceResult').innerText = 'Erro ao verificar dispositivos.';
+            }
+        }
+
+        async function clearAllCache() {
+            if (!confirm('⚠️ Isso vai desconectar TODOS os Zaps. Tem certeza?')) return;
+            try {
+                const res = await fetch('/api/clear-cache', { method: 'POST' });
+                const data = await res.json();
+                document.getElementById('maintenanceResult').style.display = 'block';
+                document.getElementById('maintenanceResult').innerText = data.message || data.error;
+            } catch (error) {
+                document.getElementById('maintenanceResult').innerText = 'Erro ao limpar cache.';
+            }
+        }
+
+        // Inicializar
+        populateWarmupCheckboxes();
+        refreshStatus();
+        setInterval(() => {
+            if (!isWarmupActive) refreshStatus();
+        }, 10000);
+    </script>
+</body>
+</html>

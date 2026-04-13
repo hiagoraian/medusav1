@@ -1,0 +1,74 @@
+import wwebjs from 'whatsapp-web.js';
+import { processSpintax, simulateTyping, humanDelay } from '../services/antiSpam.js';
+import { generateUniqueVideoHash, cleanTempMedia } from '../services/mediaProcessor.js';
+
+const { MessageMedia } = wwebjs;
+
+/**
+ * Função responsável por executar o disparo individual aplicando todas as regras de segurança.
+ * @param {Object} client - A instância conectada do whatsapp-web.js
+ * @param {string} phone - O número de destino (ex: 5511999999999)
+ * @param {string} rawText - O texto com Spintax
+ * @param {string} mediaPath - (Opcional) Caminho do vídeo ou imagem original
+ * @param {string} mediaMode - (Opcional) 'caption' (legenda) ou 'separate' (separado)
+ */
+export const executeSend = async (client, phone, rawText, mediaPath = null, mediaMode = 'caption') => {
+    try {
+        // Valida se o cliente está conectado
+        if (!client) {
+            return { success: false, status: 'falha', error: 'Cliente não está conectado.' };
+        }
+
+        // Pergunta ao WhatsApp o ID correto do número
+        const contactId = await client.getNumberId(phone);
+        
+        if (!contactId) {
+            return { success: false, status: 'invalido', error: 'Número não possui WhatsApp.' };
+        }
+
+        // Pega o ID exato que o WhatsApp usa internamente
+        const chatId = contactId._serialized;
+
+        // 1. Processa o texto quebrando a Spintax
+        const finalText = processSpintax(rawText);
+
+        // 2. Simula o comportamento humano
+        await humanDelay(2, 5);
+        if (finalText) {
+            await simulateTyping(client, chatId, finalText.length);
+        }
+
+        // 3. Lógica de Envio
+        if (!mediaPath) {
+            // CENÁRIO A: Apenas Texto
+            await client.sendMessage(chatId, finalText);
+            
+        } else {
+            // CENÁRIO B: Com Mídia
+            const safeMediaPath = await generateUniqueVideoHash(mediaPath);
+            const media = MessageMedia.fromFilePath(safeMediaPath);
+
+            if (mediaMode === 'caption') {
+                // Envia a mídia com o texto na legenda
+                await client.sendMessage(chatId, media, { caption: finalText });
+            } else {
+                // Envia separado: Primeiro o texto, depois a mídia
+                if (finalText) {
+                    await client.sendMessage(chatId, finalText);
+                    await humanDelay(3, 6);
+                }
+                await client.sendMessage(chatId, media);
+            }
+
+            // Limpa a mídia temporária
+            cleanTempMedia(safeMediaPath);
+        }
+
+        // Sucesso absoluto
+        return { success: true, status: 'enviado' };
+
+    } catch (error) {
+        console.error(`❌ Erro ao enviar para ${phone}:`, error.message);
+        return { success: false, status: 'falha', error: error.message };
+    }
+};

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medusa v4.0 - Orquestrador de Disparos</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030;}
+        .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+        h1 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 0; }
+        h2 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 30px;}
+        .section { margin-bottom: 20px; padding: 20px; background: #f9f9f9; border-radius: 8px; border: 1px solid #ddd; }
+        .btn { background-color: #25D366; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.3s;}
+        .btn:hover { background-color: #128C7E; }
+        .btn-secondary { background-color: #34b7f1; }
+        .btn-danger { background-color: #d32f2f; }
+        .info-box { background-color: #dcf8c6; padding: 15px; border-radius: 5px; margin-top: 15px; border-left: 5px solid #25D366; }
+        .grid-checkboxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 10px; margin-top: 15px; }
+        .grid-checkboxes label { background: #fff; border: 1px solid #ccc; padding: 10px; border-radius: 5px; cursor: pointer; text-align: center; font-size: 14px; }
+        .grid-checkboxes input:checked + span { font-weight: bold; color: #075e54; }
+        .form-group { margin-top: 15px; }
+        .form-group label { display: block; font-weight: bold; margin-bottom: 5px; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        textarea { resize: vertical; min-height: 100px; }
+        .dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .stat-card h3 { margin: 0; font-size: 14px; color: #666; }
+        .stat-card p { margin: 10px 0 0; font-size: 24px; font-weight: bold; color: #075e54; }
+        .progress-container { margin-top: 20px; background: #eee; border-radius: 10px; height: 20px; overflow: hidden; }
+        .progress-bar { background: #25D366; height: 100%; width: 0%; transition: 0.5s; }
+        .nav { display: flex; gap: 10px; margin-bottom: 20px; }
+        .nav a { padding: 10px 20px; background: #f0f0f0; border-radius: 5px; text-decoration: none; color: #075e54; font-weight: bold; }
+        .nav a:hover { background: #e0e0e0; }
+        .time-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; margin-top: 15px; }
+        .time-grid label { background: #fff; border: 1px solid #ccc; padding: 10px; border-radius: 5px; cursor: pointer; text-align: center; font-size: 13px; }
+        .time-grid input:checked + span { font-weight: bold; color: #075e54; background: #dcf8c6; }
+        .btn-group-horizontal { display: flex; gap: 10px; margin-top: 15px; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.65); z-index: 1000; align-items: center; justify-content: center; }
+        .modal-overlay.active { display: flex; }
+        .modal-box { background: #fff; padding: 30px; border-radius: 12px; max-width: 460px; width: 90%; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        .modal-box h2 { color: #d32f2f; margin-top: 0; }
+        .modal-stats { background: #f9f9f9; border-radius: 8px; padding: 14px; margin: 16px 0; display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
+        .modal-stats div { text-align: center; }
+        .modal-stats span { display: block; font-size: 22px; font-weight: bold; color: #075e54; }
+        .modal-stats small { color: #666; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <!-- Modal: Campanha Interrompida -->
+    <div class="modal-overlay" id="modalInterrupted">
+        <div class="modal-box">
+            <h2>⚠️ Disparo Interrompido Detectado</h2>
+            <p>O sistema encontrou uma campanha que não foi concluída. O que deseja fazer?</p>
+            <div class="modal-stats" id="modalStats">
+                <div><span id="modalPending">-</span><small>Pendentes</small></div>
+                <div><span id="modalSent">-</span><small>Enviados</small></div>
+                <div><span id="modalFailed">-</span><small>Falhas</small></div>
+            </div>
+            <div style="display:flex; gap:12px; margin-top:8px;">
+                <button class="btn btn-danger" style="flex:1;" onclick="suspendCampaign()">🗑️ Suspender</button>
+                <button class="btn" style="flex:1;" onclick="continueCampaign()">▶️ Continuar Disparo</button>
+            </div>
+            <p style="color:#999; font-size:12px; margin-bottom:0;">
+                <b>Suspender</b> apaga tudo e zera o dashboard.<br>
+                <b>Continuar</b> mantém os dados — configure os zaps e inicie normalmente.
+            </p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h1>🚀 Medusa v4.0 - Orquestrador de Disparos</h1>
+        
+        <div class="nav">
+            <a href="zaps.html">🔌 Gestão de Zaps</a>
+        </div>
+
+        <div class="dashboard">
+            <div class="stat-card"><h3>Pendentes</h3><p id="statPending">0</p></div>
+            <div class="stat-card"><h3>Enviados</h3><p id="statSent">0</p></div>
+            <div class="stat-card"><h3>Falhas</h3><p id="statFailed" style="color: #d32f2f;">0</p></div>
+            <div class="stat-card"><h3>Status</h3><p id="statStatus">Pronto</p></div>
+        </div>
+
+        <div id="cycleProgress" style="display: none;">
+            <p id="progressText">Progresso do Ciclo: 0/0</p>
+            <div class="progress-container"><div class="progress-bar" id="progressBar"></div></div>
+            <div style="margin-top: 10px; display: flex; gap: 10px;">
+                <button class="btn btn-secondary" onclick="downloadReport()">📄 Relatório</button>
+                <button class="btn btn-secondary" onclick="downloadFailures()">❌ Falhas</button>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>1. Upload de Listas (Excel)</h2>
+            <form id="uploadForm">
+                <input type="file" id="excelFiles" accept=".xlsx, .xls" multiple required>
+                <div class="btn-group-horizontal">
+                    <button type="submit" class="btn" style="flex: 2;">Processar Listas</button>
+                    <button type="button" class="btn btn-danger" style="flex: 1;" onclick="clearQueue()">🧹 Limpar Fila</button>
+                </div>
+            </form>
+            <div id="uploadResult" class="info-box" style="display: none;"></div>
+        </div>
+
+        <div class="section">
+            <h2>2. Seleção de Zaps</h2>
+            <p>Selecione os Zaps que vão disparar:</p>
+            <div class="grid-checkboxes" id="accountsGrid"></div>
+            <button class="btn" style="background-color: #666; margin-top: 15px;" onclick="selectAllAccounts()">Selecionar Todas</button>
+        </div>
+
+        <div class="section">
+            <h2>3. Configuração de Disparo</h2>
+            
+            <div class="form-group">
+                <label>📊 Mensagens por Ciclo (total a cada 45 min):</label>
+                <input type="number" id="msgsPerCycle" value="384" min="5" max="1000">
+                <small style="color: #666; display:block; margin-top:4px;">
+                    <b>Sugestão:</b> 384 mensagens para 24 zaps = ~16 disparos por zap a cada 45 min.
+                </small>
+            </div>
+
+            <div class="form-group">
+                <label>⏰ Selecione os Horários de Disparo (Ciclos):</label>
+                <div class="time-grid" id="timeGrid"></div>
+                <small style="color: #666; display: block; margin-top: 10px;">Cada horário inicia um ciclo de <b>45 min</b> de disparo, com 15 min de descanso até o próximo.</small>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>4. Conteúdo da Mensagem</h2>
+            
+            <div class="form-group">
+                <label>💬 Texto (Suporta Spintax: {Olá|Oi} {João|Amigo}):</label>
+                <textarea id="messageText" placeholder="Digite sua mensagem aqui..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>📸 Mídia (Opcional):</label>
+                <input type="file" id="mediaFile" accept="video/mp4, image/jpeg, image/png">
+            </div>
+
+            <div class="form-group">
+                <label>📝 Modo de Envio:</label>
+                <select id="mediaMode">
+                    <option value="caption">Texto como Legenda da Mídia</option>
+                    <option value="separate">Mídia separada (Texto depois Mídia)</option>
+                </select>
+            </div>
+        </div>
+
+        <button class="btn" id="btnStart" style="font-size: 18px; padding: 15px;" onclick="startCampaign()">🚀 INICIAR ORQUESTRADOR</button>
+    </div>
+
+    <script>
+        let currentCycleId = null;
+
+        // Gerar checkboxes dos 24 Zaps (Atualizado)
+        const accountsGrid = document.getElementById('accountsGrid');
+        for (let i = 1; i <= 24; i++) {
+            const num = i.toString().padStart(2, '0');
+            const id = `WA-${num}`;
+            accountsGrid.innerHTML += `<label><input type="checkbox" class="zap-cb" value="${id}"> <span>${id}</span></label>`;
+        }
+
+        // Gerar checkboxes de horários — apenas horas cheias de 08:00 a 21:00
+        // Cada slot = 45 min de disparo + 15 min de descanso natural até o próximo
+        const timeGrid = document.getElementById('timeGrid');
+        for (let hour = 8; hour <= 21; hour++) {
+            const time = `${hour.toString().padStart(2, '0')}:00`;
+            timeGrid.innerHTML += `<label><input type="checkbox" class="time-cb" value="${time}"> <span>${time}</span></label>`;
+        }
+
+        function selectAllAccounts() {
+            document.querySelectorAll('.zap-cb').forEach(cb => cb.checked = true);
+        }
+
+        async function updateDashboard() {
+            try {
+                const res = await fetch('/api/dashboard-stats');
+                const data = await res.json();
+                document.getElementById('statPending').innerText = data.totalPending;
+                document.getElementById('statSent').innerText = data.totalSent;
+                document.getElementById('statFailed').innerText = data.totalFailed;
+
+                const progress = document.getElementById('cycleProgress');
+                if (data.lastCycle) {
+                    currentCycleId = data.lastCycle.id;
+                    document.getElementById('statStatus').innerText = data.lastCycle.status.toUpperCase();
+                    progress.style.display = 'block';
+                    const total = data.lastCycle.total_messages;
+                    const processed = data.lastCycle.sent_count + data.lastCycle.fail_count;
+                    document.getElementById('progressText').innerText = `Progresso do Ciclo: ${processed}/${total}`;
+                    document.getElementById('progressBar').style.width = total > 0 ? `${(processed / total) * 100}%` : '0%';
+                } else {
+                    // Nenhum ciclo ativo — zera o dashboard
+                    document.getElementById('statStatus').innerText = 'Pronto';
+                    progress.style.display = 'none';
+                    currentCycleId = null;
+                }
+            } catch (e) {}
+        }
+
+        async function checkInterrupted() {
+            try {
+                const res = await fetch('/api/check-interrupted');
+                const data = await res.json();
+                if (data.interrupted) {
+                    document.getElementById('modalPending').innerText = data.interrupted.pending;
+                    document.getElementById('modalSent').innerText = data.interrupted.sent_count;
+                    document.getElementById('modalFailed').innerText = data.interrupted.fail_count;
+                    document.getElementById('modalInterrupted').classList.add('active');
+                }
+            } catch (e) {}
+        }
+
+        async function suspendCampaign() {
+            try {
+                await fetch('/api/suspend-campaign', { method: 'POST' });
+            } catch (e) {}
+            document.getElementById('modalInterrupted').classList.remove('active');
+            updateDashboard();
+        }
+
+        function continueCampaign() {
+            document.getElementById('modalInterrupted').classList.remove('active');
+        }
+
+        setInterval(updateDashboard, 3000);
+
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            const files = document.getElementById('excelFiles').files;
+            for (let i = 0; i < files.length; i++) formData.append('excelFiles', files[i]);
+            
+            const res = await fetch('/api/upload-lists', { method: 'POST', body: formData });
+            const data = await res.json();
+            document.getElementById('uploadResult').style.display = 'block';
+            document.getElementById('uploadResult').innerHTML = `
+                <strong>✅ Processamento Concluído!</strong><br>
+                Total de Contatos Únicos: <strong>${data.totalUnicos}</strong><br>
+                Contatos Recebidos: ${data.totalRecebidos}
+            `;
+            updateDashboard();
+        });
+
+        async function clearQueue() {
+            if (!confirm('⚠️ Tem certeza que deseja remover TODAS as mensagens pendentes da fila?')) return;
+            try {
+                const res = await fetch('/api/clear-queue', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message);
+                updateDashboard();
+            } catch (error) {
+                alert('Erro ao limpar fila.');
+            }
+        }
+
+        async function startCampaign() {
+            const selectedZaps = Array.from(document.querySelectorAll('.zap-cb:checked')).map(cb => cb.value);
+            const selectedTimes = Array.from(document.querySelectorAll('.time-cb:checked')).map(cb => cb.value);
+            
+            if (selectedZaps.length === 0) return alert('⚠️ Selecione pelo menos 1 Zap.');
+            if (selectedTimes.length === 0) return alert('⚠️ Selecione pelo menos 1 horário.');
+
+            const formData = new FormData();
+            formData.append('accounts', JSON.stringify(selectedZaps));
+            formData.append('messageText', document.getElementById('messageText').value);
+            formData.append('mediaMode', document.getElementById('mediaMode').value);
+            formData.append('msgsPerCycle', document.getElementById('msgsPerCycle').value);
+            formData.append('selectedTimes', JSON.stringify(selectedTimes));
+            
+            const media = document.getElementById('mediaFile').files[0];
+            if (media) formData.append('mediaFile', media);
+
+            const btn = document.getElementById('btnStart');
+            btn.innerHTML = '⏳ ORQUESTRADOR EM EXECUÇÃO...';
+            btn.style.backgroundColor = '#ff9800';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/start-campaign', { method: 'POST', body: formData });
+                const data = await res.json();
+                alert(data.message || data.error);
+            } catch (error) {
+                alert('Erro ao conectar com o servidor.');
+            } finally {
+                btn.innerHTML = '🚀 INICIAR ORQUESTRADOR';
+                btn.style.backgroundColor = '#25D366';
+                btn.disabled = false;
+            }
+        }
+
+        function downloadReport() { if (currentCycleId) window.location.href = `/api/report/${currentCycleId}`; }
+        function downloadFailures() { if (currentCycleId) window.location.href = `/api/failure-list/${currentCycleId}`; }
+
+        checkInterrupted();
+        updateDashboard();
+    </script>
+</body>
+</html>

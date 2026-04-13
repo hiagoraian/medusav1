@@ -1,0 +1,19 @@
+# Dependências
+node_modules/
+
+# Cache de sessões do WhatsApp (cada máquina faz login do zero)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Banco de dados local (cada máquina tem o seu)
+orquestrador.sqlite
+
+# Mídia temporária
+temp_media/
+
+# Logs de crash
+reports/crashes/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
