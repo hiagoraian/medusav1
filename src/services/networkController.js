@@ -195,10 +195,15 @@ export const rotateMobileIPs = async () => {
  */
 export const isMobileConnectionActive = async (port) => {
     try {
-        // Tenta uma requisição rápida para o proxy local
-        // Se falhar, assume que os dados móveis caíram
-        const { stdout } = await execPromise(`curl -s -o /dev/null -w "%{http_code}" --proxy 127.0.0.1:${port} http://www.google.com --connect-timeout 5`);
-        return stdout === "200";
+        // /dev/null não existe no Windows — usa NUL no Windows e /dev/null nos demais.
+        // Bug anterior: no Windows a chamada sempre lançava erro silencioso e retornava
+        // false, fazendo TODOS os zaps ignorarem o proxy e usarem o Wi-Fi do PC.
+        const nullDevice = os.platform() === 'win32' ? 'NUL' : '/dev/null';
+        const { stdout } = await execPromise(
+            `curl -s -o ${nullDevice} -w "%{http_code}" --proxy 127.0.0.1:${port} http://www.google.com --connect-timeout 5`,
+            { timeout: 8000 }
+        );
+        return stdout.trim() === '200';
     } catch (error) {
         return false;
     }

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestão de Zaps - Medusa v4.0</title>
+    <title>Gestão de Zaps - Medusa</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030;}
         .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
@@ -28,11 +28,17 @@
         .nav a { padding: 10px 20px; background: #f0f0f0; border-radius: 5px; text-decoration: none; color: #075e54; font-weight: bold; }
         .nav a:hover { background: #e0e0e0; }
         .warmup-controls { display: flex; gap: 10px; margin-top: 15px; }
+        .reconnect-bar { margin-top: 15px; display: none; }
+        .reconnect-bar .progress-track { background: #e0e0e0; border-radius: 20px; height: 10px; overflow: hidden; margin: 8px 0; }
+        .reconnect-bar .progress-fill  { height: 100%; width: 0%; background: #25D366; border-radius: 20px; transition: width 0.4s ease; }
+        .reconnect-bar .progress-label { font-size: 13px; color: #555; }
+        .btn-reconnect-all { background-color: #075e54; }
+        .btn-reconnect-all:hover { background-color: #054c44; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🔌 Gestão de Zaps (1-24) - v4.0</h1>
+        <h1>🔌 Gestão de Zaps (1-24)</h1>
         
         <div class="nav">
             <a href="index.html">← Voltar ao Painel</a>
@@ -40,7 +46,16 @@
 
         <div class="section">
             <h2>Status dos Zaps</h2>
-            <button class="btn btn-secondary" onclick="refreshStatus()">🔄 Atualizar Status</button>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button class="btn btn-secondary" onclick="refreshStatus()">🔄 Atualizar Status</button>
+                <button id="btnReconnectAll" class="btn btn-reconnect-all" onclick="reconnectAll()">⚡ Reconectar Todos</button>
+            </div>
+
+            <div class="reconnect-bar" id="reconnectBar">
+                <div class="progress-track"><div class="progress-fill" id="reconnectFill"></div></div>
+                <div class="progress-label" id="reconnectLabel">Aguardando...</div>
+            </div>
+
             <div class="zap-list" id="zapsList"></div>
         </div>
 
@@ -70,28 +85,100 @@
 
         async function refreshStatus() {
             try {
-                const res = await fetch('/api/zaps-status');
+                const res  = await fetch('/api/zaps-status');
                 const data = await res.json();
-                const zapsList = document.getElementById('zapsList');
-                zapsList.innerHTML = '';
-                
-                data.forEach(zap => {
-                    const card = document.createElement('div');
-                    card.className = 'zap-card';
-                    const statusClass = zap.connected ? 'status-online' : 'status-offline';
-                    const statusText = zap.connected ? '✅ Ativo' : '❌ Inativo';
-                    
-                    card.innerHTML = `
-                        <h3>${zap.accountId}</h3>
-                        <div class="status-badge ${statusClass}">${statusText}</div>
-                        <div class="btn-group">
-                            <button class="btn btn-secondary" onclick="connectZap('${zap.accountId}')">Conectar</button>
-                        </div>
-                    `;
-                    zapsList.appendChild(card);
-                });
+                renderZapCards(data);
             } catch (error) {
                 console.error('Erro ao atualizar status:', error);
+            }
+        }
+
+        async function reconnectAll() {
+            const btn   = document.getElementById('btnReconnectAll');
+            const bar   = document.getElementById('reconnectBar');
+            const fill  = document.getElementById('reconnectFill');
+            const label = document.getElementById('reconnectLabel');
+
+            const allAccounts = Array.from({ length: 24 }, (_, i) => `WA-${String(i + 1).padStart(2, '0')}`);
+            const total = allAccounts.length;
+
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Reconectando...';
+            bar.style.display = 'block';
+            fill.style.width = '0%';
+            label.innerText = `Iniciando... 0 / ${total} conectados`;
+
+            try {
+                await fetch('/api/whatsapp/start-bulk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accounts: allAccounts })
+                });
+            } catch (e) {
+                label.innerText = '❌ Erro ao acionar o servidor.';
+                btn.disabled = false;
+                btn.innerHTML = '⚡ Reconectar Todos';
+                return;
+            }
+
+            // Polling: atualiza a cada 6s enquanto o servidor processa em background
+            let pollCount = 0;
+            const MAX_POLLS = 60; // até 6 min de espera total
+            const pollInterval = setInterval(async () => {
+                pollCount++;
+                try {
+                    const res  = await fetch('/api/zaps-status');
+                    const data = await res.json();
+                    const connected = data.filter(z => z.connected).length;
+                    const pct = Math.round((connected / total) * 100);
+
+                    fill.style.width  = pct + '%';
+                    label.innerText   = `${connected} / ${total} conectados (${pct}%)`;
+
+                    // Atualiza os cards sem piscar
+                    renderZapCards(data);
+
+                    if (connected === total || pollCount >= MAX_POLLS) {
+                        clearInterval(pollInterval);
+                        label.innerText = connected === total
+                            ? `✅ Todos os ${total} Zaps conectados!`
+                            : `⚠️ ${connected} / ${total} conectados. Verifique o terminal para QR Codes pendentes.`;
+                        btn.disabled = false;
+                        btn.innerHTML = '⚡ Reconectar Todos';
+                    }
+                } catch (_) {}
+            }, 6000);
+        }
+
+        function renderZapCards(data) {
+            const zapsList = document.getElementById('zapsList');
+            zapsList.innerHTML = '';
+            data.forEach(zap => {
+                const card = document.createElement('div');
+                card.className = 'zap-card';
+                const statusClass = zap.connected ? 'status-online' : 'status-offline';
+                const statusText  = zap.connected ? '✅ Ativo' : '❌ Inativo';
+                card.innerHTML = `
+                    <h3>${zap.accountId}</h3>
+                    <div class="status-badge ${statusClass}">${statusText}</div>
+                    <div class="btn-group">
+                        <button class="btn btn-secondary" onclick="connectZap('${zap.accountId}')">Conectar</button>
+                        <button class="btn btn-danger" onclick="deleteZap('${zap.accountId}')" title="Apaga o cache de sessão">🗑️</button>
+                    </div>
+                `;
+                zapsList.appendChild(card);
+            });
+        }
+
+        async function deleteZap(accountId) {
+            if (!confirm(`⚠️ Isso vai apagar o cache do ${accountId} e desconectá-lo.\n\nEle precisará escanear o QR Code novamente.\n\nConfirmar?`)) return;
+            try {
+                const res  = await fetch(`/api/whatsapp/${accountId}`, { method: 'DELETE' });
+                const data = await res.json();
+                alert(data.message || data.error);
+                refreshStatus();
+            } catch (e) {
+                alert('Erro ao excluir o Zap.');
             }
         }
 

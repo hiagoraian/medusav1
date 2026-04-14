@@ -10,11 +10,13 @@ const __dirname = path.dirname(__filename);
 const WARMUP_FILE_PATH = path.resolve(__dirname, '../../textAquecimento.txt');
 
 let isWarmupRunning = false;
+let _phrasesCache = null; // cache em memória — evita leitura de disco em cada conversa
 
 /**
- * Carrega as frases do arquivo textAquecimento.txt
+ * Carrega as frases do arquivo textAquecimento.txt (com cache em memória)
  */
 const loadWarmupPhrases = () => {
+    if (_phrasesCache) return _phrasesCache;
     try {
         if (!fs.existsSync(WARMUP_FILE_PATH)) {
             const defaultPhrases = [
@@ -24,10 +26,12 @@ const loadWarmupPhrases = () => {
                 "Vou verificar e te aviso.", "Até logo!", "Tchau!", "Ok, combinado."
             ];
             fs.writeFileSync(WARMUP_FILE_PATH, defaultPhrases.join('\n'), 'utf8');
-            return defaultPhrases;
+            _phrasesCache = defaultPhrases;
+            return _phrasesCache;
         }
         const content = fs.readFileSync(WARMUP_FILE_PATH, 'utf8');
-        return content.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        _phrasesCache = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        return _phrasesCache;
     } catch (error) {
         console.error('❌ [AQUECIMENTO] Erro ao carregar frases:', error.message);
         return ["Oi", "Tudo bem?", "Sim", "Não"];
@@ -124,39 +128,56 @@ export const warmupChipConversation = async (fromAccountId, toAccountId) => {
 /**
  * Inicia o processo de aquecimento contínuo entre todos os chips selecionados
  */
+/**
+ * Filtra a lista mantendo apenas zaps atualmente conectados.
+ * Loga cada remoção para que o usuário saiba o que aconteceu.
+ */
+const filterActiveAccounts = (accountsList) => {
+    return accountsList.filter(id => {
+        const ready = isClientReady(getClientInstance(id));
+        if (!ready) console.warn(`⚠️ [AQUECIMENTO] ${id} desconectado. Removendo do aquecimento.`);
+        return ready;
+    });
+};
+
 export const startWarmup = async (accountsList) => {
-    if (accountsList.length < 2) {
-        console.warn('⚠️ [AQUECIMENTO] Necessário pelo menos 2 contas para aquecer.');
+    // Filtra já na entrada — não inicia se não tiver ao menos 2 conectados
+    let activeAccounts = filterActiveAccounts(accountsList);
+
+    if (activeAccounts.length < 2) {
+        console.warn('⚠️ [AQUECIMENTO] Menos de 2 contas conectadas. Abortando aquecimento.');
         return;
     }
 
     isWarmupRunning = true;
-    console.log(`\n🔥 [AQUECIMENTO] Iniciando aquecimento em PARES (Ida e Volta) entre ${accountsList.length} contas...`);
+    console.log(`\n🔥 [AQUECIMENTO] Iniciando aquecimento em PARES entre ${activeAccounts.length} contas...`);
     console.log(`📄 Usando frases de: ${WARMUP_FILE_PATH}`);
 
     while (isWarmupRunning) {
-        // Embaralha a lista para criar pares aleatórios
-        const shuffled = [...accountsList].sort(() => 0.5 - Math.random());
-        
-        // Tenta realizar conversas em pares
+        // Re-verifica conexões a cada rodada para remover zaps que caíram
+        const before = activeAccounts.length;
+        activeAccounts = filterActiveAccounts(activeAccounts);
+
+        if (activeAccounts.length < before) {
+            console.log(`[AQUECIMENTO] Lista atualizada: ${activeAccounts.length} zap(s) ativo(s).`);
+        }
+
+        if (activeAccounts.length < 2) {
+            console.warn('⚠️ [AQUECIMENTO] Menos de 2 contas ativas. Encerrando aquecimento automaticamente.');
+            isWarmupRunning = false;
+            break;
+        }
+
+        const shuffled = [...activeAccounts].sort(() => 0.5 - Math.random());
         for (let i = 0; i < shuffled.length - 1; i += 2) {
             if (!isWarmupRunning) break;
-            
-            const from = shuffled[i];
-            const to = shuffled[i+1];
-            
-            await warmupChipConversation(from, to);
-            
-            // Intervalo entre diferentes pares
+            await warmupChipConversation(shuffled[i], shuffled[i + 1]);
             await humanDelay(10, 20);
         }
 
-        // Pequena pausa antes de re-embaralhar e começar nova rodada de pares
         await humanDelay(15, 30);
-        
-        if (!isWarmupRunning) break;
     }
-    
+
     console.log('🛑 [AQUECIMENTO] Processo de aquecimento parado.');
 };
 
@@ -173,20 +194,19 @@ export const stopWarmup = () => {
  */
 export const quickWarmupAfterCycle = async (accountsList, durationMinutes = 5) => {
     console.log(`\n🔥 [AQUECIMENTO] Iniciando aquecimento rápido de ${durationMinutes} min pós-ciclo...`);
-    
     const endTime = Date.now() + (durationMinutes * 60 * 1000);
-    
-    while (Date.now() < endTime) {
-        const shuffled = [...accountsList].sort(() => 0.5 - Math.random());
-        const from = shuffled[0];
-        const to = shuffled[1];
 
-        await warmupChipConversation(from, to);
-        
-        // Intervalo menor para aquecimento rápido
+    while (Date.now() < endTime) {
+        const active = filterActiveAccounts(accountsList);
+        if (active.length < 2) {
+            console.warn('⚠️ [AQUECIMENTO] Menos de 2 contas ativas. Encerrando aquecimento rápido.');
+            break;
+        }
+        const shuffled = active.sort(() => 0.5 - Math.random());
+        await warmupChipConversation(shuffled[0], shuffled[1]);
         await humanDelay(5, 10);
     }
-    
+
     console.log('✅ [AQUECIMENTO] Aquecimento rápido concluído.');
 };
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Medusa v4.0 - Orquestrador de Disparos</title>
+    <title>Medusa - Orquestrador de Disparos</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030;}
         .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
@@ -43,6 +43,12 @@
         .modal-stats div { text-align: center; }
         .modal-stats span { display: block; font-size: 22px; font-weight: bold; color: #075e54; }
         .modal-stats small { color: #666; font-size: 12px; }
+        .zap-label { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .zap-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; }
+        .zap-dot.online  { background: #25D366; }
+        .zap-dot.offline { background: #d32f2f; }
+        .btn-stop { background-color: #d32f2f; display: none; }
+        .btn-stop:hover { background-color: #b71c1c; }
     </style>
 </head>
 <body>
@@ -68,7 +74,7 @@
     </div>
 
     <div class="container">
-        <h1>🚀 Medusa v4.0 - Orquestrador de Disparos</h1>
+        <h1>🚀 Medusa - Orquestrador de Disparos</h1>
         
         <div class="nav">
             <a href="zaps.html">🔌 Gestão de Zaps</a>
@@ -150,17 +156,63 @@
         </div>
 
         <button class="btn" id="btnStart" style="font-size: 18px; padding: 15px;" onclick="startCampaign()">🚀 INICIAR ORQUESTRADOR</button>
+        <button class="btn btn-stop" id="btnStop" style="font-size: 18px; padding: 15px; margin-top: 10px;" onclick="stopCampaign()">🛑 PARAR CAMPANHA</button>
+
+        <div class="section" style="margin-top: 30px;">
+            <h2>Envio de Teste</h2>
+            <p>Envia uma mensagem usando as configurações acima para um número específico antes de disparar para toda a lista.</p>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+                <div class="form-group" style="flex: 1; min-width: 180px; margin: 0;">
+                    <label>Zap para testar:</label>
+                    <select id="testAccountId"></select>
+                </div>
+                <div class="form-group" style="flex: 2; min-width: 200px; margin: 0;">
+                    <label>Número de destino (com DDI):</label>
+                    <input type="text" id="testPhone" placeholder="5511999999999">
+                </div>
+                <button class="btn btn-secondary" id="btnTestSend" style="height: 42px; white-space: nowrap;" onclick="sendTest()">📤 Enviar Teste</button>
+            </div>
+            <div id="testResult" class="info-box" style="display: none; margin-top: 15px;"></div>
+        </div>
     </div>
 
     <script>
         let currentCycleId = null;
 
-        // Gerar checkboxes dos 24 Zaps (Atualizado)
+        // Gerar checkboxes dos 24 Zaps com dot de status
         const accountsGrid = document.getElementById('accountsGrid');
         for (let i = 1; i <= 24; i++) {
             const num = i.toString().padStart(2, '0');
             const id = `WA-${num}`;
-            accountsGrid.innerHTML += `<label><input type="checkbox" class="zap-cb" value="${id}"> <span>${id}</span></label>`;
+            accountsGrid.innerHTML += `
+                <label>
+                    <input type="checkbox" class="zap-cb" value="${id}">
+                    <span class="zap-label">
+                        <span>${id}</span>
+                        <span class="zap-dot offline" id="dot-${id}"></span>
+                    </span>
+                </label>`;
+        }
+
+        // Popular select do envio de teste
+        const testSelect = document.getElementById('testAccountId');
+        for (let i = 1; i <= 24; i++) {
+            const id = `WA-${String(i).padStart(2, '0')}`;
+            testSelect.innerHTML += `<option value="${id}">${id}</option>`;
+        }
+
+        async function refreshZapStatus() {
+            try {
+                const res  = await fetch('/api/zaps-status');
+                const data = await res.json();
+                data.forEach(zap => {
+                    const dot = document.getElementById(`dot-${zap.accountId}`);
+                    if (dot) {
+                        dot.className = 'zap-dot ' + (zap.connected ? 'online' : 'offline');
+                        dot.title = zap.connected ? 'Conectado' : 'Desconectado';
+                    }
+                });
+            } catch (_) {}
         }
 
         // Gerar checkboxes de horários — apenas horas cheias de 08:00 a 21:00
@@ -186,17 +238,23 @@
                 const progress = document.getElementById('cycleProgress');
                 if (data.lastCycle) {
                     currentCycleId = data.lastCycle.id;
-                    document.getElementById('statStatus').innerText = data.lastCycle.status.toUpperCase();
+                    const status = data.lastCycle.status;
+                    document.getElementById('statStatus').innerText = status.toUpperCase();
                     progress.style.display = 'block';
                     const total = data.lastCycle.total_messages;
                     const processed = data.lastCycle.sent_count + data.lastCycle.fail_count;
                     document.getElementById('progressText').innerText = `Progresso do Ciclo: ${processed}/${total}`;
                     document.getElementById('progressBar').style.width = total > 0 ? `${(processed / total) * 100}%` : '0%';
+                    // Mostra botão Parar apenas quando campanha está ativa
+                    const isActive = status === 'em_andamento';
+                    document.getElementById('btnStop').style.display  = isActive ? 'block' : 'none';
+                    document.getElementById('btnStart').style.display = isActive ? 'none'  : 'block';
                 } else {
-                    // Nenhum ciclo ativo — zera o dashboard
                     document.getElementById('statStatus').innerText = 'Pronto';
                     progress.style.display = 'none';
                     currentCycleId = null;
+                    document.getElementById('btnStop').style.display  = 'none';
+                    document.getElementById('btnStart').style.display = 'block';
                 }
             } catch (e) {}
         }
@@ -257,6 +315,49 @@
             }
         }
 
+        async function stopCampaign() {
+            if (!confirm('Deseja realmente parar a campanha? Os envios em andamento serão finalizados antes de parar.')) return;
+            try {
+                const res  = await fetch('/api/stop-campaign', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message);
+            } catch (e) {
+                alert('Erro ao enviar sinal de parada.');
+            }
+        }
+
+        async function sendTest() {
+            const accountId = document.getElementById('testAccountId').value;
+            const phone     = document.getElementById('testPhone').value.trim().replace(/\D/g, '');
+            if (!phone) return alert('Informe o número de destino.');
+
+            const btn = document.getElementById('btnTestSend');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Enviando...';
+
+            const formData = new FormData();
+            formData.append('accountId', accountId);
+            formData.append('phone', phone);
+            formData.append('messageText', document.getElementById('messageText').value);
+            formData.append('mediaMode', document.getElementById('mediaMode').value);
+            const media = document.getElementById('mediaFile').files[0];
+            if (media) formData.append('mediaFile', media);
+
+            try {
+                const res  = await fetch('/api/test-send', { method: 'POST', body: formData });
+                const data = await res.json();
+                const box  = document.getElementById('testResult');
+                box.style.display = 'block';
+                box.style.borderColor = data.error ? '#d32f2f' : '#25D366';
+                box.innerText = data.message || data.error;
+            } catch (e) {
+                alert('Erro ao enviar teste.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '📤 Enviar Teste';
+            }
+        }
+
         async function startCampaign() {
             const selectedZaps = Array.from(document.querySelectorAll('.zap-cb:checked')).map(cb => cb.value);
             const selectedTimes = Array.from(document.querySelectorAll('.time-cb:checked')).map(cb => cb.value);
@@ -297,6 +398,8 @@
 
         checkInterrupted();
         updateDashboard();
+        refreshZapStatus();
+        setInterval(refreshZapStatus, 10000);
     </script>
 </body>
 </html>

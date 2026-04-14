@@ -1,5 +1,5 @@
 import { getPendingMessages, updateMessageStatus, updateCycleStats, countPending } from './queueService.js';
-import { getClientInstance } from '../whatsapp/manager.js';
+import { getClientInstance, isClientReady } from '../whatsapp/manager.js';
 import { executeSend } from '../whatsapp/sender.js';
 import { rotateMobileIPs } from './networkController.js';
 import { addHumanVariation } from './delayCalculator.js';
@@ -9,6 +9,11 @@ import fs from 'fs';
 import path from 'path';
 
 const CYCLE_DURATION_MS = 45 * 60 * 1000; // 45 minutos fixos
+
+let stopRequested = false;
+export const requestStop  = () => { stopRequested = true; };
+export const resetStop    = () => { stopRequested = false; };
+export const isStopRequested = () => stopRequested;
 
 /**
  * Calcula o delay entre disparos baseado em msgsPerCycle e janela de 30 min.
@@ -59,12 +64,14 @@ const waitForNextScheduledTime = async (selectedTimes) => {
  * Dispara para UM contato usando UM zap e retorna o resultado.
  */
 const dispatchOne = async (msgRow, accountId, messageTemplate, mediaPath, mediaMode, cycleId, delayMs) => {
-    const client = getClientInstance(accountId);
-    if (!client) {
-        console.log(`⚠️ [${accountId}] Cliente offline. Falha para ${msgRow.phone_number}.`);
-        await updateMessageStatus(msgRow.id, 'falha', accountId, cycleId, 'Cliente offline durante o ciclo');
+    // isClientReady verifica tanto a presença no mapa quanto a página Chromium ainda aberta.
+    // Isso pega o "zap fantasma": instância no mapa mas tab já morta por OOM ou crash.
+    if (!isClientReady(accountId)) {
+        console.log(`⚠️ [${accountId}] Zap offline ou página fechada. Marcando como falha: ${msgRow.phone_number}`);
+        await updateMessageStatus(msgRow.id, 'falha', accountId, cycleId, 'Zap offline durante o ciclo');
         return 'falha';
     }
+    const client = getClientInstance(accountId);
 
     // Delay humano proporcional
     const jitter = addHumanVariation(delayMs);
@@ -130,6 +137,10 @@ export const runCycle = async (
         const accountId = activeAccountsList[zapIdx];
         let sent = 0, failed = 0, invalid = 0;
         for (let i = 0; i < queue.length; i++) {
+            if (stopRequested) {
+                console.log(`🛑 [${accountId}] Parada solicitada. Interrompendo fila.`);
+                break;
+            }
             const status = await dispatchOne(
                 queue[i], accountId, messageTemplate, mediaPath, mediaMode, cycleId, delayPerMsg
             );
@@ -193,25 +204,30 @@ export const runCampaignLoop = async (
     cycleId,
     selectedTimes = null
 ) => {
+    resetStop();
     let hasMore = true;
-    while (hasMore) {
+    while (hasMore && !stopRequested) {
         hasMore = await runCycle(
             activeAccountsList, messageTemplate, mediaPath, mediaMode,
             msgsPerCycle, cycleId, selectedTimes
         );
 
+        if (stopRequested) {
+            console.log('\n🛑 [ORQUESTRADOR] Campanha interrompida pelo usuário.');
+            await updateCycleStats(cycleId, 0, 0, 'interrompido');
+            break;
+        }
+
         if (hasMore) {
             console.log(`\n⏳ [ORQUESTRADOR] Ciclo concluído. Aguardando próximo horário ou janela de 30 min...`);
-            // Se não houver horários específicos, espera 30 min. 
-            // Se houver, o runCycle já terá esperado dentro dele.
             if (!selectedTimes || selectedTimes.length === 0) {
                 await new Promise(resolve => setTimeout(resolve, CYCLE_DURATION_MS));
             } else {
-                // Pequena pausa para evitar loop infinito rápido se o horário ainda for o mesmo
                 await new Promise(resolve => setTimeout(resolve, 60000));
             }
         }
     }
+    resetStop();
 };
 
 export default { runCycle, runCampaignLoop };

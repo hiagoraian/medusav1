@@ -9,6 +9,22 @@ puppeteer.use(StealthPlugin());
 
 const activeClients = {};
 
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 6000;  // 6s, 12s, 18s (linear)
+const STAGGER_DELAY_MS = 5000;     // 5s entre cada conta no start-bulk
+
+const RETRYABLE_ERRORS = [
+    'Execution context was destroyed',
+    'Session closed',
+    'Target closed',
+    'Protocol error',
+    'Navigation timeout',
+    'net::ERR_',
+];
+
+const isRetryable = (error) =>
+    RETRYABLE_ERRORS.some(msg => error?.message?.includes(msg));
+
 /**
  * Retorna o proxy para a conta baseada no número do Zap.
  * Reestruturado para 24 números:
@@ -40,23 +56,37 @@ const getProxyForAccount = async (accountId) => {
     return '';
 };
 
-export const initializeAccount = async (accountId) => {
-    console.log(`\n[${accountId}] Iniciando processo de conexão...`);
+export const initializeAccount = async (accountId, attempt = 1) => {
+    console.log(`\n[${accountId}] Iniciando conexão... (tentativa ${attempt}/${MAX_RETRIES})`);
     const proxyArg = await getProxyForAccount(accountId);
-    
+
     const client = new Client({
         authStrategy: new LocalAuth({ clientId: accountId }),
         puppeteer: {
             headless: true,
             args: [
+                // Segurança / sandbox
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                proxyArg,
+                // Memória: reduz uso geral do Chromium
                 '--disable-dev-shm-usage',
+                '--disable-gpu',
                 '--disable-accelerated-2d-canvas',
+                '--disable-extensions',
+                '--disable-component-extensions-with-background-pages',
+                '--disable-background-networking',
+                '--disable-sync',
+                '--disable-translate',
+                '--disable-default-apps',
+                '--mute-audio',
+                // Inicialização limpa
                 '--no-first-run',
                 '--no-zygote',
-                '--disable-gpu'
+                '--disable-hang-monitor',
+                '--disable-prompt-on-repost',
+                '--disable-client-side-phishing-detection',
+                '--disable-component-update',
+                proxyArg,
             ].filter(arg => arg !== '')
         }
     });
@@ -70,6 +100,9 @@ export const initializeAccount = async (accountId) => {
     });
 
     client.on('ready', () => {
+        // Guard: ignora disparos duplicados do evento 'ready'
+        if (activeClients[accountId]) return;
+        activeClients[accountId] = client;
         console.log(`✅ [${accountId}] Conectado e Pronto para Disparos!`);
     });
 
@@ -80,16 +113,61 @@ export const initializeAccount = async (accountId) => {
 
     try {
         await client.initialize();
-        activeClients[accountId] = client;
+        // Garante que o client esteja registrado mesmo que o 'ready' tenha sido perdido
+        if (!activeClients[accountId]) activeClients[accountId] = client;
         return { success: true, message: `Instância ${accountId} iniciada.` };
     } catch (error) {
-        console.error(`[${accountId}] Erro fatal ao iniciar:`, error);
+        console.error(`[${accountId}] Erro na tentativa ${attempt}:`, error.message);
+        try { await client.destroy(); } catch (_) {}
+
+        if (isRetryable(error) && attempt < MAX_RETRIES) {
+            const delay = RETRY_BASE_DELAY_MS * attempt;
+            console.log(`[${accountId}] Erro recuperável. Nova tentativa em ${delay / 1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return initializeAccount(accountId, attempt + 1);
+        }
+
         return { success: false, error: error.message };
     }
 };
 
+/**
+ * Inicia múltiplas contas com delay escalonado entre cada uma,
+ * evitando pico de memória por subir todos os Chromiums ao mesmo tempo.
+ */
+export const initializeAccountsBulk = async (accountIds) => {
+    const results = [];
+    for (let i = 0; i < accountIds.length; i++) {
+        const accountId = accountIds[i];
+
+        if (getClientStatus(accountId)) {
+            console.log(`[BULK] [${accountId}] Já estava ativo. Pulando.`);
+            results.push({ accountId, success: true, message: 'Já estava ativo.' });
+        } else {
+            console.log(`[BULK] Iniciando ${accountId} (${i + 1}/${accountIds.length})...`);
+            const result = await initializeAccount(accountId);
+            results.push({ accountId, ...result });
+        }
+
+        if (i < accountIds.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, STAGGER_DELAY_MS));
+        }
+    }
+    return results;
+};
+
 export const getClientStatus = (accountId) => {
     return !!activeClients[accountId];
+};
+
+/** Verifica se o cliente está conectado E com a página Chromium ainda aberta. */
+export const isClientReady = (accountId) => {
+    const client = activeClients[accountId];
+    try {
+        return !!(client && client.pupPage && !client.pupPage.isClosed());
+    } catch (_) {
+        return false;
+    }
 };
 
 export const getClientInstance = (accountId) => {
@@ -107,4 +185,4 @@ export const getAllClientsStatus = async () => {
     return status;
 };
 
-export default { initializeAccount, getClientInstance, getClientStatus, getAllClientsStatus };
+export default { initializeAccount, initializeAccountsBulk, getClientInstance, getClientStatus, isClientReady, getAllClientsStatus };

@@ -12,21 +12,40 @@ const { MessageMedia } = wwebjs;
  * @param {string} mediaPath - (Opcional) Caminho do vídeo ou imagem original
  * @param {string} mediaMode - (Opcional) 'caption' (legenda) ou 'separate' (separado)
  */
+/** Remove formatação e garante que o número tenha apenas dígitos. */
+const normalizePhone = (phone) => String(phone).replace(/\D/g, '');
+
+/** Envolve uma promise com timeout para evitar hang infinito no WhatsApp Web. */
+const withTimeout = (promise, ms, label) =>
+    Promise.race([
+        promise,
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout (${ms}ms) em: ${label}`)), ms)
+        )
+    ]);
+
 export const executeSend = async (client, phone, rawText, mediaPath = null, mediaMode = 'caption') => {
     try {
-        // Valida se o cliente está conectado
         if (!client) {
             return { success: false, status: 'falha', error: 'Cliente não está conectado.' };
         }
 
-        // Pergunta ao WhatsApp o ID correto do número
-        const contactId = await client.getNumberId(phone);
-        
+        const normalizedPhone = normalizePhone(phone);
+        if (normalizedPhone.length < 10) {
+            return { success: false, status: 'invalido', error: `Número inválido: "${phone}"` };
+        }
+
+        // Timeout de 15s para evitar hang caso o WhatsApp Web congele durante a consulta
+        const contactId = await withTimeout(
+            client.getNumberId(normalizedPhone),
+            15000,
+            `getNumberId(${normalizedPhone})`
+        );
+
         if (!contactId) {
             return { success: false, status: 'invalido', error: 'Número não possui WhatsApp.' };
         }
 
-        // Pega o ID exato que o WhatsApp usa internamente
         const chatId = contactId._serialized;
 
         // 1. Processa o texto quebrando a Spintax

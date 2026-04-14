@@ -5,18 +5,19 @@ import db from '../database/db.js';
  */
 export const addContactsToQueue = (numbers) => {
     return new Promise((resolve, reject) => {
-        const stmt = db.prepare(`INSERT INTO messages_queue (phone_number, status) VALUES (?, 'pendente')`);
+        // stmt criado e finalizado DENTRO do serialize para evitar race condition
+        // com o COMMIT. O bug anterior (stmt.finalize fora do serialize) podia
+        // chamar finalize antes do COMMIT completar, corrompendo a transação.
         db.serialize(() => {
+            const stmt = db.prepare(`INSERT INTO messages_queue (phone_number, status) VALUES (?, 'pendente')`);
             db.run('BEGIN TRANSACTION');
-            numbers.forEach(phone => {
-                stmt.run(phone);
-            });
+            numbers.forEach(phone => stmt.run(phone));
             db.run('COMMIT', (err) => {
+                stmt.finalize();
                 if (err) reject(err);
                 else resolve(numbers.length);
             });
         });
-        stmt.finalize();
     });
 };
 
@@ -37,7 +38,7 @@ export const clearQueue = () => {
  */
 export const getPendingMessages = (limit) => {
     return new Promise((resolve, reject) => {
-        db.all(`SELECT id, phone_number FROM messages_queue WHERE status = 'pendente' LIMIT ?`, [limit], (err, rows) => {
+        db.all(`SELECT id, phone_number FROM messages_queue WHERE status = 'pendente' ORDER BY id ASC LIMIT ?`, [limit], (err, rows) => {
             if (err) reject(err);
             else resolve(rows);
         });

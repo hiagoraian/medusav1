@@ -8,8 +8,8 @@ import { fileURLToPath } from 'url';
 import db from './src/database/db.js';
 import { processExcelFiles } from './src/services/excelProcessor.js';
 import { addContactsToQueue, countPending, createCycle, getDashboardStats, clearQueue, resetCampaign } from './src/services/queueService.js';
-import { initializeAccount, getClientStatus, getAllClientsStatus } from './src/whatsapp/manager.js';
-import { runCampaignLoop } from './src/services/orchestrator.js';
+import { initializeAccount, initializeAccountsBulk, getClientInstance, getClientStatus, getAllClientsStatus } from './src/whatsapp/manager.js';
+import { runCampaignLoop, requestStop } from './src/services/orchestrator.js';
 import { startWarmup, stopWarmup } from './src/services/chipWarmup.js';
 import { checkAllDevicesStatus, setupAllAdbForwards } from './src/services/networkController.js';
 import { generateCycleReport, generateFailureList } from './src/services/reportGenerator.js';
@@ -72,7 +72,7 @@ process.on('uncaughtException', handleCrash);
 process.on('unhandledRejection', handleCrash);
 
 (async () => {
-    console.log('\n🚀 [STARTUP] Iniciando Medusa v4.0 (Resiliente)...\n');
+    console.log('\n🚀 [STARTUP] Iniciando Medusa...\n');
     try {
         console.log('🔗 [STARTUP] Configurando conexões ADB e ZTE...');
         await setupAllAdbForwards();
@@ -95,7 +95,7 @@ process.on('unhandledRejection', handleCrash);
 // ==========================================
 
 app.get('/api/status', (req, res) => {
-    res.json({ status: 'Medusa v4.0 Ativo', porta: PORT, persistencia: 'Habilitada' });
+    res.json({ status: 'Medusa Ativo', porta: PORT, persistencia: 'Habilitada' });
 });
 
 app.get('/api/dashboard-stats', async (req, res) => {
@@ -184,6 +184,69 @@ app.post('/api/whatsapp/start', async (req, res) => {
     await initializeAccount(accountId);
 });
 
+// Remove o cache de sessão de um Zap específico e desconecta se estiver ativo.
+app.delete('/api/whatsapp/:accountId', async (req, res) => {
+    const { accountId } = req.params;
+    if (!accountId || !/^WA-\d{2}$/.test(accountId))
+        return res.status(400).json({ error: 'ID de conta inválido.' });
+
+    // Destrói o cliente se estiver ativo
+    const client = getClientInstance(accountId);
+    if (client) {
+        try { await client.destroy(); } catch (_) {}
+    }
+
+    // Remove a pasta de sessão do LocalAuth
+    const sessionPath = path.resolve(__dirname, `.wwebjs_auth/session-${accountId}`);
+    if (fs.existsSync(sessionPath)) {
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+        console.log(`🗑️ [${accountId}] Cache de sessão removido: ${sessionPath}`);
+        return res.json({ message: `Cache do ${accountId} removido com sucesso.` });
+    } else {
+        return res.json({ message: `${accountId} não tinha cache salvo.` });
+    }
+});
+
+// Apaga o cache de sessão de TODOS os Zaps e desconecta os ativos.
+app.post('/api/clear-cache', async (req, res) => {
+    // Destrói todos os clientes ativos
+    const allStatus = await getAllClientsStatus();
+    for (const { accountId } of allStatus) {
+        const client = getClientInstance(accountId);
+        if (client) {
+            try { await client.destroy(); } catch (_) {}
+        }
+    }
+
+    // Remove toda a pasta .wwebjs_auth
+    const authDir = path.resolve(__dirname, '.wwebjs_auth');
+    if (fs.existsSync(authDir)) {
+        fs.rmSync(authDir, { recursive: true, force: true });
+        console.log('🧹 [CACHE] Todos os caches de sessão foram removidos.');
+        return res.json({ message: '✅ Cache de todos os Zaps removido. Eles precisarão escanear o QR Code novamente.' });
+    }
+
+    res.json({ message: 'Nenhum cache encontrado para remover.' });
+});
+
+// Inicia múltiplas contas com delay escalonado (5s entre cada uma)
+// para evitar pico de memória ao subir todos os Chromiums juntos.
+app.post('/api/whatsapp/start-bulk', async (req, res) => {
+    const { accounts } = req.body;
+    if (!accounts || !Array.isArray(accounts) || accounts.length === 0)
+        return res.status(400).json({ error: 'Lista de contas não fornecida.' });
+
+    res.json({
+        message: `Iniciando ${accounts.length} conta(s) de forma escalonada (5s entre cada). Acompanhe pelo terminal!`,
+        accounts
+    });
+
+    // Roda em background para não bloquear a resposta
+    initializeAccountsBulk(accounts).catch(err => {
+        console.error('[start-bulk] Erro inesperado:', err.message);
+    });
+});
+
 app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res) => {
     try {
         const { accounts, messageText, mediaMode, msgsPerCycle, selectedTimes } = req.body;
@@ -230,6 +293,40 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
     }
 });
 
+app.post('/api/stop-campaign', (req, res) => {
+    requestStop();
+    console.log('🛑 [API] Parada de campanha solicitada pelo usuário.');
+    res.json({ message: '🛑 Sinal de parada enviado. O orquestrador vai parar após o envio atual.' });
+});
+
+app.post('/api/test-send', uploadMedia.single('mediaFile'), async (req, res) => {
+    try {
+        const { accountId, phone, messageText, mediaMode } = req.body;
+        if (!accountId || !phone)
+            return res.status(400).json({ error: 'accountId e phone são obrigatórios.' });
+
+        const client = getClientInstance(accountId);
+        if (!client)
+            return res.status(400).json({ error: `${accountId} não está conectado.` });
+
+        const mediaPath = req.file ? req.file.path : null;
+        const { executeSend } = await import('./src/whatsapp/sender.js');
+        const result = await executeSend(client, phone, messageText || '', mediaPath, mediaMode || 'caption');
+
+        if (mediaPath && fs.existsSync(mediaPath)) fs.unlinkSync(mediaPath);
+
+        if (result.status === 'enviado') {
+            res.json({ message: `✅ Mensagem enviada com sucesso para ${phone}!` });
+        } else if (result.status === 'invalido') {
+            res.json({ message: `🚫 O número ${phone} não possui WhatsApp.` });
+        } else {
+            res.status(500).json({ error: `❌ Falha ao enviar: ${result.error}` });
+        }
+    } catch (error) {
+        res.status(500).json({ error: 'Erro interno: ' + error.message });
+    }
+});
+
 app.post('/api/warmup-chips/start', async (req, res) => {
     try {
         const { accounts } = req.body;
@@ -268,5 +365,5 @@ app.get('/api/report/:cycleId', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`\n🚀 Medusa v4.0 rodando em: http://localhost:${PORT}\n`);
+    console.log(`\n🚀 Medusa rodando em: http://localhost:${PORT}\n`);
 });
