@@ -193,11 +193,9 @@ export const getClientInstance = (accountId) => {
 
 export const getAllClientsStatus = async () => {
     const status = [];
-    // Atualizado para 24 números
     for (let i = 1; i <= 24; i++) {
         const accountId = `WA-${i.toString().padStart(2, '0')}`;
-        const isConnected = getClientStatus(accountId);
-        status.push({ accountId, connected: isConnected });
+        status.push({ accountId, connected: isClientReady(accountId) });
     }
     return status;
 };
