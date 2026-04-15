@@ -1,103 +1,124 @@
-# 🚀 Medusa - Orquestrador de Disparos v4.0 (Resiliente)
+# Medusa — Orquestrador de Disparos WhatsApp
 
-O Medusa é um sistema avançado de automação de mensagens WhatsApp com suporte a 28 contas, projetado para operar com alta performance e resiliência total a falhas.
-
-## ✨ Novidades da Versão 4.0 (Refatorada)
-
-### 1. **Persistência de Estado Real**
-- **Sem Perda de Dados:** O banco de dados SQLite não é mais deletado ao iniciar. Todas as campanhas, filas e relatórios são mantidos.
-- **Recuperação Pós-Falha:** Se o computador desligar ou o sistema cair, ao reiniciar, o Medusa detecta campanhas interrompidas e permite retomar exatamente de onde parou.
-
-### 2. **Resiliência ADB e ZTE**
-- **Retries Automáticos:** Configuração de portas ADB agora possui tentativas automáticas (retries) em caso de falha de conexão inicial.
-- **Monitoramento de Saúde:** Verificação contínua do status dos dispositivos ZTE.
-
-### 3. **Disparos e Naturalidade**
-- **Divisão Equilibrada:** As mensagens por ciclo são divididas de forma exata entre os aparelhos ativos (ex: 16 disparos por zap em ciclos de 30 min).
-- **Tratamento de Números Inválidos:** Números que não possuem WhatsApp são identificados e destacados nos relatórios, sem interromper o fluxo.
-- **Simulação Humana:** Delays aleatórios e simulação de digitação aprimorados para máxima naturalidade.
-
-### 4. **Relatórios Automáticos**
-- **Salvamento Automático:** Ao final de cada ciclo de 30 minutos, relatórios gerais e de falhas são salvos automaticamente na pasta `reports/`.
-- **Crash Dump:** Em caso de erro fatal, o sistema gera um log de emergência com o estado atual antes de encerrar.
-
-### 5. **Novo Sistema de Aquecimento**
-- **textAquecimento.txt:** Agora você pode editar os diálogos de aquecimento diretamente em um arquivo de texto simples, um por linha.
-- **Conversação Natural:** Os chips conversam entre si de forma aleatória e natural até que o comando de parada seja enviado.
+Sistema de automação de mensagens WhatsApp com suporte a 24 contas simultâneas, projetado para operar com alta resiliência, naturalidade humana nos envios e recuperação automática de falhas.
 
 ---
 
-## 📋 Arquitetura v4.0
+## Funcionalidades
+
+### Disparos
+- Upload de listas Excel com deduplicação automática
+- Distribuição equilibrada entre os zaps ativos
+- Suporte a texto com **Spintax** `{Olá|Oi} {cliente|amigo}`
+- Suporte a mídia (imagem/vídeo) como legenda ou separada
+- Agendamento por horários com ciclos de 45 minutos
+- Parada limpa da campanha a qualquer momento
+- Envio de teste antes de disparar para a lista
+
+### Resiliência
+- Banco de dados SQLite persistente — sem perda de dados ao reiniciar
+- Recuperação automática de campanhas interrompidas por queda do sistema
+- Crash dump com estado completo salvo em `reports/crashes/`
+- Retry automático no Chromium em erros recuperáveis
+- Zap "fantasma" detectado e tratado (página morta mas objeto ativo)
+- Inicialização escalonada dos Chromiums para evitar pico de memória
+
+### Conexão e Rede
+- Suporte a 3 modems ZTE via ADB com retry automático por porta
+- Failover automático para Wi-Fi do PC se dados móveis falharem
+- Rotação de IP via Modo Avião ao final de cada ciclo
+- Verificação real do status do zap (página + objetos internos do WA Web)
+
+### Aquecimento
+- Conversação natural entre pares de zaps via `textAquecimento.txt`
+- Remoção automática de zaps desconectados durante o aquecimento
+- Aquecimento rápido pós-ciclo (5 min)
+
+### Gestão de Zaps
+- Reconexão em massa com progresso em tempo real
+- Status de conexão visual por zap (verde/vermelho)
+- Exclusão de cache de sessão individual ou em massa
+
+---
+
+## Arquitetura
 
 ```
 medusa/
-├── server.js                          # Servidor Express (Resiliente)
-├── ARCHITECTURE.md                    # Documentação técnica da v4.0
-├── textAquecimento.txt                # Seus diálogos de aquecimento (Edite aqui!)
+├── server.js                          # Servidor Express + rotas da API
+├── textAquecimento.txt                # Frases de aquecimento (uma por linha)
 ├── orquestrador.sqlite                # Banco de dados persistente
-├── reports/                           # Relatórios automáticos por ciclo
-├── src/
-│   ├── database/
-│   │   └── db.js                      # Inicialização persistente do SQLite
-│   ├── services/
-│   │   ├── antiSpam.js                # Spintax, delays humanos, digitação
-│   │   ├── chipWarmup.js              # Aquecimento via arquivo de texto
-│   │   ├── networkController.js       # Controle de rede e ADB com Retries
-│   │   ├── orchestrator.js            # Orquestrador com relatórios automáticos
-│   │   └── queueService.js            # Gerenciamento de fila persistente
-│   └── whatsapp/
-│       ├── manager.js                 # Gerenciador de contas WhatsApp
-│       └── sender.js                  # Envio com tratamento de números inválidos
+├── reports/                           # Relatórios por ciclo e crashes
+├── public/
+│   ├── index.html                     # Painel principal de disparos
+│   └── zaps.html                      # Gestão de zaps e aquecimento
+└── src/
+    ├── database/
+    │   └── db.js                      # Inicialização e schema do SQLite
+    ├── services/
+    │   ├── antiSpam.js                # Spintax, delays humanos, simulação de digitação
+    │   ├── chipWarmup.js              # Aquecimento entre pares de zaps
+    │   ├── delayCalculator.js         # Cálculo de delays adaptativos por ciclo
+    │   ├── excelProcessor.js          # Leitura e normalização de listas Excel
+    │   ├── mediaProcessor.js          # Processamento e hash de mídia
+    │   ├── networkController.js       # ADB, ZTE, rotação de IP
+    │   ├── orchestrator.js            # Loop de campanha e controle de ciclos
+    │   ├── queueService.js            # Fila persistente de disparos
+    │   └── reportGenerator.js         # Geração de relatórios por ciclo
+    ├── tests/
+    │   ├── antiSpam.test.js           # Testes de spintax e delays
+    │   ├── excelProcessor.test.js     # Testes de normalização de números
+    │   └── sender.test.js             # Testes de formatação de telefone
+    └── whatsapp/
+        ├── manager.js                 # Ciclo de vida das instâncias WhatsApp
+        └── sender.js                  # Envio individual com anti-spam
 ```
 
 ---
 
-## 🔧 Instalação e Setup
+## Instalação
 
-### 1. Instalar Dependências
 ```bash
-cd medusa
 npm install
-```
-
-### 2. Configurar ADB
-Certifique-se de que o ADB está no PATH ou no caminho padrão:
-- **Windows:** `C:\adb\adb.exe`
-- **Linux:** `/usr/bin/adb`
-
-### 3. Iniciar o Servidor
-```bash
 npm start
 ```
+
 Acesse: `http://localhost:3000`
 
----
-
-## 🌐 Distribuição de Zaps por Porta
-
-- **ZTE 1 (Zaps 1-12):** Porta 8080
-- **ZTE 2 (Zaps 13-20):** Porta 8081
-- **ZTE 3 (Zaps 21-28):** Porta 8082
+### Pré-requisito: ADB
+O ADB deve estar disponível no sistema:
+- **Windows:** `C:\adb\adb.exe`
+- **Linux/Mac:** `/usr/bin/adb`
 
 ---
 
-## 📊 Funcionamento dos Ciclos
+## Distribuição de Zaps por Modem
 
-1. **Upload:** Suba sua lista Excel.
-2. **Seleção:** Escolha os Zaps ativos.
-3. **Configuração:** Defina as mensagens por ciclo (ex: 466 para 28 zaps = ~16 por zap).
-4. **Horários:** Defina os horários de início dos ciclos.
-5. **Execução:** O sistema divide a carga, dispara simultaneamente em 30 min, rotaciona IPs e gera relatórios.
-6. **Aquecimento:** Após o ciclo, os zaps entram em aquecimento automático de 5 min.
+| Modem | Zaps     | Porta |
+|-------|----------|-------|
+| ZTE 1 | WA-01–08 | 8080  |
+| ZTE 2 | WA-09–16 | 8081  |
+| ZTE 3 | WA-17–24 | 8082  |
+
+---
+
+## Fluxo de Disparo
+
+1. **Upload** — Suba a lista Excel (`.xlsx`)
+2. **Seleção** — Escolha os zaps ativos (dots verdes)
+3. **Configuração** — Defina mensagens por ciclo (sugestão: 16 por zap × nº de zaps)
+4. **Horários** — Selecione os horários de início dos ciclos
+5. **Conteúdo** — Digite o texto (com Spintax) e anexe mídia se necessário
+6. **Teste** — Envie para um número real antes de disparar para a lista
+7. **Disparo** — Inicie o orquestrador. Cada ciclo dura 45 minutos.
+8. **Aquecimento** — Após os disparos, aqueça os chips pelo painel de gestão
 
 ---
 
-## 🔐 Segurança e Resiliência
+## Testes
 
-- **Crash Recovery:** Se o sistema cair, os números que faltam estarão salvos no banco.
-- **Relatório de Erro:** Verifique `reports/crashes/` para entender por que o sistema parou.
-- **IP Rotation:** Rotação automática via Modo Avião ao final de cada ciclo para evitar bloqueios.
+```bash
+npm test
+```
 
----
-**Versão:** 4.0.0  
-**Desenvolvido para Máxima Resiliência e Performance.**
+19 testes cobrindo spintax, delays, normalização de telefone e processamento de Excel.
