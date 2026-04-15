@@ -26,17 +26,19 @@ const calcDelayBetweenMsgs = (msgsPerCycle) => {
 };
 
 /**
- * Verifica se o horário atual está dentro dos horários selecionados
+ * Verifica se o horário atual está dentro dos horários selecionados.
+ * Aceita uma janela de até 5 minutos APÓS o horário agendado para tolerar
+ * pequenos atrasos no loop (ex: agendado 08:00, checado às 08:03 → ok).
  */
 const isWithinSelectedTime = (selectedTimes) => {
     if (!selectedTimes || selectedTimes.length === 0) return true;
     const now = new Date();
-    const currentHour   = now.getHours().toString().padStart(2, '0');
-    const currentMinute = now.getMinutes().toString().padStart(2, '0');
-    const currentTime   = `${currentHour}:${currentMinute}`;
-    
-    // Verifica se o horário atual coincide com algum dos horários agendados
-    return selectedTimes.includes(currentTime);
+    return selectedTimes.some(time => {
+        const [hour, minute] = time.split(':').map(Number);
+        const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0);
+        const diffMs = now - target; // positivo = já passou, negativo = ainda não chegou
+        return diffMs >= 0 && diffMs <= 5 * 60 * 1000; // até 5 min após o horário
+    });
 };
 
 const waitForNextScheduledTime = async (selectedTimes) => {
@@ -168,7 +170,7 @@ export const runCycle = async (
     console.log(`\n✅ [ORQUESTRADOR] Ciclo finalizado.`);
     console.log(`📊 Resumo: ✅ Enviados: ${totalSent} | ❌ Falhas: ${totalFailed} | 🚫 Inválidos: ${totalInvalid}`);
 
-    // --- RELATÓRIOS AUTOMÁTICOS (v4.0) ---
+    // --- RELATÓRIOS AUTOMÁTICOS ---
     try {
         const reportPath = await generateCycleReport(cycleId);
         const failurePath = await generateFailureList(cycleId);

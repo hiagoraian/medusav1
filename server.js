@@ -38,7 +38,7 @@ const mediaStorage = multer.diskStorage({
 const uploadMedia = multer({ storage: mediaStorage });
 
 // ==========================================
-// RESILIÊNCIA E RECUPERAÇÃO (v4.0)
+// RESILIÊNCIA E RECUPERAÇÃO
 // ==========================================
 
 const handleCrash = async (error) => {
@@ -361,6 +361,15 @@ app.get('/api/report/:cycleId', async (req, res) => {
         res.download(filePath);
     } catch (error) {
         res.status(500).json({ error: 'Erro ao gerar relatório.' });
+    }
+});
+
+app.get('/api/failure-list/:cycleId', async (req, res) => {
+    try {
+        const filePath = await generateFailureList(req.params.cycleId);
+        res.download(filePath);
+    } catch (error) {
+        res.status(500).json({ error: 'Erro ao gerar lista de falhas.' });
     }
 });
 

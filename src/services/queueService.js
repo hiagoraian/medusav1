@@ -22,7 +22,7 @@ export const addContactsToQueue = (numbers) => {
 };
 
 /**
- * Remove todas as mensagens pendentes da fila. (Novo na v4.0)
+ * Remove todas as mensagens pendentes da fila.
  */
 export const clearQueue = () => {
     return new Promise((resolve, reject) => {

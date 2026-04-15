@@ -49,7 +49,7 @@ db.serialize(() => {
         )
     `);
 
-    // Tabela para persistir configurações e estado global (Novo na v4.0)
+    // Tabela para persistir configurações e estado global
     db.run(`
         CREATE TABLE IF NOT EXISTS system_state (
             key TEXT PRIMARY KEY,
