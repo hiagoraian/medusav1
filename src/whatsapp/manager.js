@@ -99,9 +99,20 @@ export const initializeAccount = async (accountId, attempt = 1) => {
         console.log(`======================================================\n`);
     });
 
-    client.on('ready', () => {
+    client.on('ready', async () => {
         // Guard: ignora disparos duplicados do evento 'ready'
         if (activeClients[accountId]) return;
+
+        // O evento 'ready' dispara quando o Chromium termina a injeção,
+        // mas os objetos internos do WA Web (client.info.wid, Store.WidFactory)
+        // ainda levam alguns segundos para inicializar. Aguarda até 10s.
+        for (let i = 0; i < 10; i++) {
+            try {
+                if (client.info?.wid?._serialized) break;
+            } catch (_) {}
+            await new Promise(r => setTimeout(r, 1000));
+        }
+
         activeClients[accountId] = client;
         console.log(`✅ [${accountId}] Conectado e Pronto para Disparos!`);
     });
@@ -160,11 +171,17 @@ export const getClientStatus = (accountId) => {
     return !!activeClients[accountId];
 };
 
-/** Verifica se o cliente está conectado E com a página Chromium ainda aberta. */
+/** Verifica se o cliente está conectado, com a página aberta E com os objetos
+ *  internos do WA Web prontos (client.info.wid disponível). */
 export const isClientReady = (accountId) => {
     const client = activeClients[accountId];
     try {
-        return !!(client && client.pupPage && !client.pupPage.isClosed());
+        return !!(
+            client &&
+            client.pupPage &&
+            !client.pupPage.isClosed() &&
+            client.info?.wid?._serialized
+        );
     } catch (_) {
         return false;
     }

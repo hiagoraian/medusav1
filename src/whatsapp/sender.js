@@ -35,12 +35,31 @@ export const executeSend = async (client, phone, rawText, mediaPath = null, medi
             return { success: false, status: 'invalido', error: `Número inválido: "${phone}"` };
         }
 
-        // Timeout de 15s para evitar hang caso o WhatsApp Web congele durante a consulta
-        const contactId = await withTimeout(
-            client.getNumberId(normalizedPhone),
-            15000,
-            `getNumberId(${normalizedPhone})`
-        );
+        // Retry até 3x para erros de WA interno ainda não inicializado (WidFactory/Store).
+        // Acontece quando o cliente acabou de conectar e o WA Web ainda está carregando.
+        let contactId = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                contactId = await withTimeout(
+                    client.getNumberId(normalizedPhone),
+                    15000,
+                    `getNumberId(${normalizedPhone})`
+                );
+                break;
+            } catch (err) {
+                const waNotReady =
+                    err.message?.includes('WidFactory') ||
+                    err.message?.includes('Store') ||
+                    err.message?.includes('Execution context');
+
+                if (waNotReady && attempt < 3) {
+                    console.log(`[sender] WA interno não pronto (tentativa ${attempt}/3). Aguardando 4s...`);
+                    await new Promise(r => setTimeout(r, 4000));
+                } else {
+                    throw err;
+                }
+            }
+        }
 
         if (!contactId) {
             return { success: false, status: 'invalido', error: 'Número não possui WhatsApp.' };
