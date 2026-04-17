@@ -2,16 +2,27 @@ import wwebjs from 'whatsapp-web.js';
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import qrcode from 'qrcode-terminal';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { isMobileConnectionActive } from '../services/networkController.js';
 
 const { Client, LocalAuth } = wwebjs;
 puppeteer.use(StealthPlugin());
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const activeClients = {};
 
-const MAX_RETRIES = 3;
-const RETRY_BASE_DELAY_MS = 6000;  // 6s, 12s, 18s (linear)
-const STAGGER_DELAY_MS = 5000;     // 5s entre cada conta no start-bulk
+// Contador de retries de auth_failure por conta (módulo-level para sobreviver a tentativas consecutivas)
+const authRetries = {};
+
+const MAX_RETRIES       = 3;
+const MAX_AUTH_RETRIES  = 3;   // quantas vezes tenta reconectar do cache após auth_failure
+const MAX_QR_ATTEMPTS   = 3;   // quantos QR codes mostra antes de parar e pedir nova conexão
+const RETRY_BASE_DELAY_MS = 6000;
+const STAGGER_DELAY_MS    = 5000;
 
 const RETRYABLE_ERRORS = [
     'Execution context was destroyed',
@@ -26,8 +37,20 @@ const isRetryable = (error) =>
     RETRYABLE_ERRORS.some(msg => error?.message?.includes(msg));
 
 /**
+ * Verifica se existe pasta de sessão salva para a conta.
+ * Usado para distinguir "reconexão com cache" de "primeiro login".
+ */
+export const hasSessionCache = (accountId) => {
+    const sessionPath = path.resolve(__dirname, '../../.wwebjs_auth', `session-${accountId}`);
+    try {
+        return fs.existsSync(sessionPath);
+    } catch (_) {
+        return false;
+    }
+};
+
+/**
  * Retorna o proxy para a conta baseada no número do Zap.
- * Reestruturado para 24 números:
  * ZTE 1: 1-8 (Porta 8080)
  * ZTE 2: 9-16 (Porta 8081)
  * ZTE 3: 17-24 (Porta 8082)
@@ -35,24 +58,22 @@ const isRetryable = (error) =>
 const getProxyForAccount = async (accountId) => {
     const num = parseInt(accountId.split('-')[1]);
     let port = 0;
-    
+
     if (num >= 1 && num <= 8) port = 8080;
     else if (num >= 9 && num <= 16) port = 8081;
     else if (num >= 17 && num <= 24) port = 8082;
-    
+
     if (port > 0) {
-        // Implementação de Failover Wi-Fi:
-        // Verifica se a conexão móvel está ativa. Se não, retorna vazio (usa Wi-Fi do PC)
         const isMobileOk = await isMobileConnectionActive(port);
         if (isMobileOk) {
             console.log(`[${accountId}] Usando Dados Móveis (Porta ${port})`);
             return `--proxy-server=127.0.0.1:${port}`;
         } else {
             console.warn(`⚠️ [${accountId}] Dados Móveis falharam na porta ${port}. Usando Wi-Fi do PC.`);
-            return ''; // Sem proxy = Wi-Fi do PC
+            return '';
         }
     }
-    
+
     return '';
 };
 
@@ -65,10 +86,8 @@ export const initializeAccount = async (accountId, attempt = 1) => {
         puppeteer: {
             headless: true,
             args: [
-                // Segurança / sandbox
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                // Memória: reduz uso geral do Chromium
                 '--disable-dev-shm-usage',
                 '--disable-gpu',
                 '--disable-accelerated-2d-canvas',
@@ -79,7 +98,6 @@ export const initializeAccount = async (accountId, attempt = 1) => {
                 '--disable-translate',
                 '--disable-default-apps',
                 '--mute-audio',
-                // Inicialização limpa
                 '--no-first-run',
                 '--no-zygote',
                 '--disable-hang-monitor',
@@ -91,17 +109,53 @@ export const initializeAccount = async (accountId, attempt = 1) => {
         }
     });
 
+    // Contador por instância de cliente (cada nova chamada começa do zero)
+    let qrCount = 0;
+
     client.on('qr', (qr) => {
+        qrCount++;
+
+        // Após MAX_QR_ATTEMPTS QR Codes exibidos sem leitura, para e avisa
+        if (qrCount > MAX_QR_ATTEMPTS) {
+            console.log(`\n⏰ [${accountId}] QR Code expirou ${MAX_QR_ATTEMPTS} vezes sem leitura.`);
+            console.log(`   ➤ Clique em "Conectar" novamente para tentar.\n`);
+            client.destroy().catch(() => {});
+            return;
+        }
+
         console.log(`\n======================================================`);
-        console.log(`⚠️ QR CODE EXIGIDO PARA A CONTA: ${accountId}`);
+        console.log(`⚠️ QR CODE (${qrCount}/${MAX_QR_ATTEMPTS}) — CONTA: ${accountId}`);
         console.log(`Escaneie o código abaixo com o celular físico:`);
         qrcode.generate(qr, { small: true });
         console.log(`======================================================\n`);
     });
 
+    client.on('auth_failure', async (msg) => {
+        console.warn(`⚠️ [${accountId}] Falha de autenticação: ${msg}`);
+        delete activeClients[accountId];
+
+        authRetries[accountId] = (authRetries[accountId] || 0) + 1;
+
+        // Se tem cache salvo, tenta reconectar automaticamente antes de pedir nova leitura
+        if (hasSessionCache(accountId) && authRetries[accountId] <= MAX_AUTH_RETRIES) {
+            console.log(`[${accountId}] Cache existe. Retry automático ${authRetries[accountId]}/${MAX_AUTH_RETRIES} em 5s...`);
+            try { await client.destroy(); } catch (_) {}
+            await new Promise(r => setTimeout(r, 5000));
+            initializeAccount(accountId, 1).catch(e =>
+                console.error(`[${accountId}] Erro no retry de auth_failure:`, e.message)
+            );
+        } else {
+            console.log(`[${accountId}] Autenticação falhou após ${authRetries[accountId]} tentativa(s). Clique em "Conectar" novamente.`);
+            authRetries[accountId] = 0;
+        }
+    });
+
     client.on('ready', async () => {
         // Guard: ignora disparos duplicados do evento 'ready'
         if (activeClients[accountId]) return;
+
+        // Reset do contador de auth_failure ao conectar com sucesso
+        authRetries[accountId] = 0;
 
         // O evento 'ready' dispara quando o Chromium termina a injeção,
         // mas os objetos internos do WA Web (client.info.wid, Store.WidFactory)
@@ -124,7 +178,6 @@ export const initializeAccount = async (accountId, attempt = 1) => {
 
     try {
         await client.initialize();
-        // Garante que o client esteja registrado mesmo que o 'ready' tenha sido perdido
         if (!activeClients[accountId]) activeClients[accountId] = client;
         return { success: true, message: `Instância ${accountId} iniciada.` };
     } catch (error) {
@@ -200,4 +253,4 @@ export const getAllClientsStatus = async () => {
     return status;
 };
 
-export default { initializeAccount, initializeAccountsBulk, getClientInstance, getClientStatus, isClientReady, getAllClientsStatus };
+export default { initializeAccount, initializeAccountsBulk, getClientInstance, getClientStatus, isClientReady, getAllClientsStatus, hasSessionCache };

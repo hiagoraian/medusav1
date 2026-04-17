@@ -99,20 +99,35 @@
             const fill  = document.getElementById('reconnectFill');
             const label = document.getElementById('reconnectLabel');
 
-            const allAccounts = Array.from({ length: 24 }, (_, i) => `WA-${String(i + 1).padStart(2, '0')}`);
-            const total = allAccounts.length;
+            // Busca só os zaps que têm cache salvo — evita abrir QR Code para contas nunca conectadas
+            let accountsWithCache = [];
+            try {
+                const res  = await fetch('/api/zaps-status');
+                const data = await res.json();
+                accountsWithCache = data.filter(z => z.hasCache).map(z => z.accountId);
+                renderZapCards(data);
+            } catch (e) {
+                label.innerText = '❌ Erro ao verificar status.';
+                return;
+            }
 
+            if (accountsWithCache.length === 0) {
+                alert('Nenhum Zap com cache salvo encontrado.\nUse "Conectar" individualmente para escanear o QR Code de cada um.');
+                return;
+            }
+
+            const total = accountsWithCache.length;
             btn.disabled = true;
             btn.innerHTML = '⏳ Reconectando...';
             bar.style.display = 'block';
             fill.style.width = '0%';
-            label.innerText = `Iniciando... 0 / ${total} conectados`;
+            label.innerText = `Iniciando ${total} Zap(s) com cache... 0 / ${total} conectados`;
 
             try {
                 await fetch('/api/whatsapp/start-bulk', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ accounts: allAccounts })
+                    body: JSON.stringify({ accounts: accountsWithCache })
                 });
             } catch (e) {
                 label.innerText = '❌ Erro ao acionar o servidor.';
@@ -129,20 +144,19 @@
                 try {
                     const res  = await fetch('/api/zaps-status');
                     const data = await res.json();
-                    const connected = data.filter(z => z.connected).length;
+                    // Conta apenas os que tinham cache (são os que estão sendo reconectados)
+                    const connected = data.filter(z => z.hasCache && z.connected).length;
                     const pct = Math.round((connected / total) * 100);
 
                     fill.style.width  = pct + '%';
                     label.innerText   = `${connected} / ${total} conectados (${pct}%)`;
-
-                    // Atualiza os cards sem piscar
                     renderZapCards(data);
 
-                    if (connected === total || pollCount >= MAX_POLLS) {
+                    if (connected >= total || pollCount >= MAX_POLLS) {
                         clearInterval(pollInterval);
-                        label.innerText = connected === total
-                            ? `✅ Todos os ${total} Zaps conectados!`
-                            : `⚠️ ${connected} / ${total} conectados. Verifique o terminal para QR Codes pendentes.`;
+                        label.innerText = connected >= total
+                            ? `✅ Todos os ${total} Zaps reconectados!`
+                            : `⚠️ ${connected} / ${total} conectados. Verifique o terminal.`;
                         btn.disabled = false;
                         btn.innerHTML = '⚡ Reconectar Todos';
                     }
@@ -158,11 +172,15 @@
                 card.className = 'zap-card';
                 const statusClass = zap.connected ? 'status-online' : 'status-offline';
                 const statusText  = zap.connected ? '✅ Ativo' : '❌ Inativo';
+                const cacheLabel  = zap.hasCache
+                    ? '<span style="font-size:11px;color:#075e54;">💾 Cache OK</span>'
+                    : '<span style="font-size:11px;color:#999;">🔑 Sem cache</span>';
                 card.innerHTML = `
                     <h3>${zap.accountId}</h3>
                     <div class="status-badge ${statusClass}">${statusText}</div>
+                    <div style="margin:4px 0;">${cacheLabel}</div>
                     <div class="btn-group">
-                        <button class="btn btn-secondary" onclick="connectZap('${zap.accountId}')">Conectar</button>
+                        <button class="btn btn-secondary" onclick="connectZap('${zap.accountId}', ${!!zap.hasCache})">Conectar</button>
                         <button class="btn btn-danger" onclick="deleteZap('${zap.accountId}')" title="Apaga o cache de sessão">🗑️</button>
                     </div>
                 `;
@@ -182,15 +200,19 @@
             }
         }
 
-        async function connectZap(accountId) {
-            alert(`Conectando ${accountId}. Verifique o terminal do Node.js para o QR Code!`);
+        async function connectZap(accountId, hasCache) {
+            const msg = hasCache
+                ? `Restaurando sessão do ${accountId} a partir do cache...\nO sistema vai reconectar automaticamente. Acompanhe o terminal.`
+                : `${accountId} não tem cache salvo.\nO terminal vai exibir um QR Code — escaneie com o celular.`;
+            alert(msg);
             try {
                 await fetch('/api/whatsapp/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ accountId })
                 });
-                setTimeout(refreshStatus, 2000);
+                // Cache: espera mais para o Chromium carregar a sessão antes de atualizar
+                setTimeout(refreshStatus, hasCache ? 8000 : 3000);
             } catch (error) {
                 alert('Erro ao conectar.');
             }

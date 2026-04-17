@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import db from './src/database/db.js';
 import { processExcelFiles } from './src/services/excelProcessor.js';
 import { addContactsToQueue, countPending, createCycle, getDashboardStats, clearQueue, resetCampaign } from './src/services/queueService.js';
-import { initializeAccount, initializeAccountsBulk, getClientInstance, getClientStatus, getAllClientsStatus } from './src/whatsapp/manager.js';
+import { initializeAccount, initializeAccountsBulk, getClientInstance, getClientStatus, getAllClientsStatus, hasSessionCache } from './src/whatsapp/manager.js';
 import { runCampaignLoop, requestStop } from './src/services/orchestrator.js';
 import { startWarmup, stopWarmup } from './src/services/chipWarmup.js';
 import { checkAllDevicesStatus, setupAllAdbForwards } from './src/services/networkController.js';
@@ -110,7 +110,13 @@ app.get('/api/dashboard-stats', async (req, res) => {
 app.get('/api/zaps-status', async (req, res) => {
     try {
         const status = await getAllClientsStatus();
-        res.json(status);
+        // Inclui hasCache para a UI distinguir zaps com sessão salva dos sem cache
+        const statusWithCache = status.map(({ accountId, connected }) => ({
+            accountId,
+            connected,
+            hasCache: hasSessionCache(accountId)
+        }));
+        res.json(statusWithCache);
     } catch (error) {
         res.status(500).json({ error: 'Erro ao obter status dos Zaps.' });
     }
