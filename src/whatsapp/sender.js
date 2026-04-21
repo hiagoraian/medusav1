@@ -47,10 +47,17 @@ export const executeSend = async (client, phone, rawText, mediaPath = null, medi
                 );
                 break;
             } catch (err) {
+                // "Execution context was destroyed, most likely because of a navigation"
+                // significa que o WA Web navegou para a página de QR (sessão invalidada).
+                // Nesse caso, retry não adianta — a sessão sumiu. Falha imediata.
+                const sessionNavigated = err.message?.includes('navigation');
+
                 const waNotReady =
-                    err.message?.includes('WidFactory') ||
-                    err.message?.includes('Store') ||
-                    err.message?.includes('Execution context');
+                    !sessionNavigated && (
+                        err.message?.includes('WidFactory') ||
+                        err.message?.includes('Store') ||
+                        err.message?.includes('Execution context')
+                    );
 
                 if (waNotReady && attempt < 3) {
                     // Só loga na 2ª tentativa — evita poluir o terminal quando vários zaps
