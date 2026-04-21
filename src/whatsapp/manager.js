@@ -110,9 +110,10 @@ export const initializeAccount = async (accountId, attempt = 1) => {
     });
 
     // Flags por instância de cliente
-    let qrCount   = 0;
-    let hadQr     = false; // QR foi exibido antes do ready → conexão via scan
-    let destroyed = false; // impede que 'ready' re-registre um client destruído pelo timeout
+    let qrCount          = 0;
+    let hadQr            = false; // QR foi exibido antes do ready → conexão via scan
+    let destroyed        = false; // impede que 'ready' re-registre um client destruído pelo timeout
+    let authFailureFired = false; // impede double-retry se auth_failure E catch dispararem juntos
 
     client.on('qr', (qr) => {
         qrCount++;
@@ -136,6 +137,7 @@ export const initializeAccount = async (accountId, attempt = 1) => {
 
     client.on('auth_failure', async (msg) => {
         console.warn(`⚠️ [${accountId}] Falha de autenticação: ${msg}`);
+        authFailureFired = true; // sinaliza para o catch do initialize() não fazer double-retry
         delete activeClients[accountId];
 
         authRetries[accountId] = (authRetries[accountId] || 0) + 1;
@@ -193,6 +195,9 @@ export const initializeAccount = async (accountId, attempt = 1) => {
     } catch (error) {
         console.error(`[${accountId}] Erro na tentativa ${attempt}:`, error.message);
         try { await client.destroy(); } catch (_) {}
+
+        // auth_failure já disparou seu próprio retry — não criar segundo Chromium em paralelo
+        if (authFailureFired) return { success: false, error: 'auth_failure em andamento' };
 
         if (isRetryable(error) && attempt < MAX_RETRIES) {
             const delay = RETRY_BASE_DELAY_MS * attempt;

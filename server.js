@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import db from './src/database/db.js';
 import { processExcelFiles } from './src/services/excelProcessor.js';
 import { addContactsToQueue, countPending, createCycle, getDashboardStats, clearQueue, resetCampaign } from './src/services/queueService.js';
-import { initializeAccount, initializeAccountsBulk, getClientInstance, getClientStatus, getAllClientsStatus, hasSessionCache } from './src/whatsapp/manager.js';
+import { initializeAccount, initializeAccountsBulk, getClientInstance, getClientStatus, isClientReady, getAllClientsStatus, hasSessionCache } from './src/whatsapp/manager.js';
 import { runCampaignLoop, requestStop } from './src/services/orchestrator.js';
 import { startWarmup, stopWarmup } from './src/services/chipWarmup.js';
 import { checkAllDevicesStatus, setupAllAdbForwards } from './src/services/networkController.js';
@@ -189,8 +189,7 @@ app.post('/api/whatsapp/start', async (req, res) => {
     // isClientReady é a verificação completa (página + wid). Se passar, realmente já está ativo.
     // getClientStatus apenas verifica o mapa — pode ser um cliente zumbi (página morta ou sem wid).
     // Nesse caso, destrói o zumbi e reinicia.
-    const { isClientReady: checkReady } = await import('./src/whatsapp/manager.js');
-    if (checkReady(accountId)) {
+    if (isClientReady(accountId)) {
         return res.json({ message: `A conta ${accountId} já está ativa e conectada.` });
     }
     if (getClientStatus(accountId)) {

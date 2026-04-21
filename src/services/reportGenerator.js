@@ -11,11 +11,10 @@ const __dirname = path.dirname(__filename);
  * @param {number} cycleId - ID do ciclo
  * @returns {Promise<string>} Caminho do arquivo gerado
  */
-/** Retorna o caminho do subdiretório de relatórios para um ciclo, criando-o se necessário. */
+/** Retorna o caminho do subdiretório de relatórios para um ciclo, criando-o se necessário.
+ *  Determinístico: o mesmo cycleId sempre resolve para a mesma pasta, independente de quando é chamado. */
 const getCycleReportDir = (cycleId) => {
-    const now = new Date();
-    const stamp = now.toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
-    const dir = path.resolve(__dirname, '../../reports', `ciclo_${cycleId}_${stamp}`);
+    const dir = path.resolve(__dirname, '../../reports', `ciclo_${cycleId}`);
     fs.mkdirSync(dir, { recursive: true });
     return dir;
 };
