@@ -126,41 +126,67 @@ export const runCycle = async (
     const msgsPerZap  = Math.ceil(pendings.length / numZaps);
     const delayPerMsg = calcDelayBetweenMsgs(msgsPerZap > 0 ? msgsPerZap : 1);
 
-    console.log(`\n🌊 [ORQUESTRADOR] Iniciando Ciclo com ${pendings.length} disparos em ${numZaps} zap(s)`);
-    console.log(`⏱️  Delay médio entre msgs por zap: ${Math.round(delayPerMsg / 1000)}s (±20%)`);
-
-    // Distribui mensagens por zap de forma equilibrada
+    // Distribui mensagens por zap de forma equilibrada (round-robin)
     const zapQueues = activeAccountsList.map((_, zapIdx) =>
         pendings.filter((_, msgIdx) => msgIdx % numZaps === zapIdx)
     );
 
-    const cycleStart = Date.now();
-    const zapPromises = zapQueues.map(async (queue, zapIdx) => {
-        const accountId = activeAccountsList[zapIdx];
-        let sent = 0, failed = 0, invalid = 0;
-        for (let i = 0; i < queue.length; i++) {
-            if (stopRequested) {
-                console.log(`🛑 [${accountId}] Parada solicitada. Interrompendo fila.`);
-                break;
-            }
-            const status = await dispatchOne(
-                queue[i], accountId, messageTemplate, mediaPath, mediaMode, cycleId, delayPerMsg
-            );
-            if (status === 'enviado') sent++;
-            else if (status === 'invalido') invalid++;
-            else failed++;
-        }
-        return { accountId, sent, failed, invalid };
-    });
+    // Agrupa os zaps em blocos de 8 (alinha com os grupos ZTE: 1-8, 9-16, 17-24).
+    // Cada bloco inicia com um delay escalonado = delayPerMsg / numBlocos,
+    // distribuindo os envios uniformemente ao longo da janela de cada mensagem
+    // em vez de disparar todos simultaneamente.
+    const BLOCK_SIZE = 8;
+    const blocks = [];
+    for (let i = 0; i < activeAccountsList.length; i += BLOCK_SIZE) {
+        blocks.push(activeAccountsList.slice(i, i + BLOCK_SIZE));
+    }
+    const blockStaggerMs = Math.floor(delayPerMsg / blocks.length);
 
-    const results = await Promise.allSettled(zapPromises);
+    console.log(`\n🌊 [ORQUESTRADOR] Iniciando Ciclo com ${pendings.length} disparos em ${numZaps} zap(s) — ${blocks.length} bloco(s) de até ${BLOCK_SIZE}`);
+    console.log(`⏱️  Delay entre msgs por zap: ~${Math.round(delayPerMsg / 1000)}s | Escalonamento entre blocos: ${Math.round(blockStaggerMs / 1000)}s`);
+
+    const blockPromises = blocks.map((blockAccounts, blockIdx) => (async () => {
+        if (blockIdx > 0) {
+            const wait = blockStaggerMs * blockIdx;
+            console.log(`⏳ [BLOCO ${blockIdx + 1}/${blocks.length}] Aguardando ${Math.round(wait / 1000)}s para iniciar (${blockAccounts[0]}–${blockAccounts[blockAccounts.length - 1]})...`);
+            await new Promise(r => setTimeout(r, wait));
+        }
+        console.log(`🚀 [BLOCO ${blockIdx + 1}/${blocks.length}] Iniciando ${blockAccounts.length} zap(s): ${blockAccounts.join(', ')}`);
+
+        const zapPromises = blockAccounts.map(async (accountId) => {
+            const zapIdx = activeAccountsList.indexOf(accountId);
+            const queue  = zapQueues[zapIdx];
+            let sent = 0, failed = 0, invalid = 0;
+            for (let i = 0; i < queue.length; i++) {
+                if (stopRequested) {
+                    console.log(`🛑 [${accountId}] Parada solicitada. Interrompendo fila.`);
+                    break;
+                }
+                const status = await dispatchOne(
+                    queue[i], accountId, messageTemplate, mediaPath, mediaMode, cycleId, delayPerMsg
+                );
+                if (status === 'enviado') sent++;
+                else if (status === 'invalido') invalid++;
+                else failed++;
+            }
+            return { accountId, sent, failed, invalid };
+        });
+
+        return Promise.allSettled(zapPromises);
+    })());
+
+    const blockResults = await Promise.allSettled(blockPromises);
 
     let totalSent = 0, totalFailed = 0, totalInvalid = 0;
-    results.forEach(r => {
-        if (r.status === 'fulfilled') {
-            totalSent    += r.value.sent;
-            totalFailed  += r.value.failed;
-            totalInvalid += r.value.invalid;
+    blockResults.forEach(blockResult => {
+        if (blockResult.status === 'fulfilled') {
+            blockResult.value.forEach(zapResult => {
+                if (zapResult.status === 'fulfilled') {
+                    totalSent    += zapResult.value.sent;
+                    totalFailed  += zapResult.value.failed;
+                    totalInvalid += zapResult.value.invalid;
+                }
+            });
         }
     });
 
