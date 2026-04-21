@@ -11,20 +11,25 @@ const __dirname = path.dirname(__filename);
  * @param {number} cycleId - ID do ciclo
  * @returns {Promise<string>} Caminho do arquivo gerado
  */
+/** Retorna o caminho do subdiretório de relatórios para um ciclo, criando-o se necessário. */
+const getCycleReportDir = (cycleId) => {
+    const now = new Date();
+    const stamp = now.toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
+    const dir = path.resolve(__dirname, '../../reports', `ciclo_${cycleId}_${stamp}`);
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+};
+
 export const generateCycleReport = async (cycleId) => {
     return new Promise((resolve, reject) => {
-        // Busca informações do ciclo
         db.get(`SELECT * FROM dispatch_cycles WHERE id = ?`, [cycleId], (err, cycle) => {
             if (err || !cycle) return reject(new Error('Ciclo não encontrado.'));
 
-            // Busca todas as mensagens do ciclo
             db.all(`SELECT * FROM messages_queue WHERE cycle_id = ?`, [cycleId], (err, messages) => {
                 if (err) return reject(err);
 
-                const reportDir = path.resolve(__dirname, '../../reports');
-                if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir);
-
-                const fileName = `relatorio_ciclo_${cycleId}_${Date.now()}.md`;
+                const reportDir = getCycleReportDir(cycleId);
+                const fileName = `relatorio.md`;
                 const filePath = path.join(reportDir, fileName);
 
                 let content = `# 📊 Relatório de Disparos - Ciclo #${cycleId}\n\n`;
@@ -64,11 +69,8 @@ export const generateFailureList = async (cycleId) => {
         db.all(`SELECT phone_number FROM messages_queue WHERE cycle_id = ? AND status != 'enviado'`, [cycleId], (err, rows) => {
             if (err) return reject(err);
 
-            const reportDir = path.resolve(__dirname, '../../reports');
-            if (!fs.existsSync(reportDir)) fs.mkdirSync(reportDir);
-
-            const fileName = `falhas_ciclo_${cycleId}_${Date.now()}.txt`;
-            const filePath = path.join(reportDir, fileName);
+            const reportDir = getCycleReportDir(cycleId);
+            const filePath = path.join(reportDir, 'falhas.txt');
 
             const content = rows.map(r => r.phone_number).join('\n');
             fs.writeFileSync(filePath, content);

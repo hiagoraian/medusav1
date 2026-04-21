@@ -11,8 +11,8 @@ orquestrador.sqlite
 # Mídia temporária
 temp_media/
 
-# Logs de crash
-reports/crashes/
+# Relatórios de disparo (cada máquina gera os seus)
+reports/
 
 # Sistema operacional
 .DS_Store

@@ -53,7 +53,9 @@ export const executeSend = async (client, phone, rawText, mediaPath = null, medi
                     err.message?.includes('Execution context');
 
                 if (waNotReady && attempt < 3) {
-                    console.log(`[sender] WA interno não pronto (tentativa ${attempt}/3). Aguardando 4s...`);
+                    // Só loga na 2ª tentativa — evita poluir o terminal quando vários zaps
+                    // estão inicializando ao mesmo tempo e o Store ainda não carregou
+                    if (attempt === 2) console.warn(`[${phone}] WA interno ainda inicializando. Última tentativa...`);
                     await new Promise(r => setTimeout(r, 4000));
                 } else {
                     throw err;

@@ -109,16 +109,20 @@ export const initializeAccount = async (accountId, attempt = 1) => {
         }
     });
 
-    // Contador por instância de cliente (cada nova chamada começa do zero)
-    let qrCount = 0;
+    // Flags por instância de cliente
+    let qrCount   = 0;
+    let hadQr     = false; // QR foi exibido antes do ready → conexão via scan
+    let destroyed = false; // impede que 'ready' re-registre um client destruído pelo timeout
 
     client.on('qr', (qr) => {
         qrCount++;
+        hadQr = true;
 
         // Após MAX_QR_ATTEMPTS QR Codes exibidos sem leitura, para e avisa
         if (qrCount > MAX_QR_ATTEMPTS) {
             console.log(`\n⏰ [${accountId}] QR Code expirou ${MAX_QR_ATTEMPTS} vezes sem leitura.`);
             console.log(`   ➤ Clique em "Conectar" novamente para tentar.\n`);
+            destroyed = true;
             client.destroy().catch(() => {});
             return;
         }
@@ -151,6 +155,8 @@ export const initializeAccount = async (accountId, attempt = 1) => {
     });
 
     client.on('ready', async () => {
+        // Guard: client foi destruído pelo timeout do QR — ignora ready tardio do celular
+        if (destroyed) return;
         // Guard: ignora disparos duplicados do evento 'ready'
         if (activeClients[accountId]) return;
 
@@ -168,7 +174,11 @@ export const initializeAccount = async (accountId, attempt = 1) => {
         }
 
         activeClients[accountId] = client;
-        console.log(`✅ [${accountId}] Conectado e Pronto para Disparos!`);
+        if (hadQr) {
+            console.log(`✅ [${accountId}] QR Code escaneado com sucesso! Pronto para Disparos!`);
+        } else {
+            console.log(`✅ [${accountId}] Sessão restaurada do cache. Pronto para Disparos!`);
+        }
     });
 
     client.on('disconnected', (reason) => {

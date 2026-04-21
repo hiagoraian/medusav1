@@ -185,7 +185,19 @@ app.post('/api/suspend-campaign', async (req, res) => {
 app.post('/api/whatsapp/start', async (req, res) => {
     const { accountId } = req.body;
     if (!accountId) return res.status(400).json({ error: 'ID da conta não fornecido.' });
-    if (getClientStatus(accountId)) return res.json({ message: `A conta ${accountId} já está ativa.` });
+
+    // isClientReady é a verificação completa (página + wid). Se passar, realmente já está ativo.
+    // getClientStatus apenas verifica o mapa — pode ser um cliente zumbi (página morta ou sem wid).
+    // Nesse caso, destrói o zumbi e reinicia.
+    const { isClientReady: checkReady } = await import('./src/whatsapp/manager.js');
+    if (checkReady(accountId)) {
+        return res.json({ message: `A conta ${accountId} já está ativa e conectada.` });
+    }
+    if (getClientStatus(accountId)) {
+        console.log(`[${accountId}] Cliente zumbi detectado. Destruindo antes de reiniciar...`);
+        try { await getClientInstance(accountId)?.destroy(); } catch (_) {}
+    }
+
     res.json({ message: `Iniciando ${accountId}. Verifique o terminal para o QR Code!` });
     await initializeAccount(accountId);
 });
