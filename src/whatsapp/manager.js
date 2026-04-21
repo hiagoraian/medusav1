@@ -219,10 +219,15 @@ export const initializeAccountsBulk = async (accountIds) => {
     for (let i = 0; i < accountIds.length; i++) {
         const accountId = accountIds[i];
 
-        if (getClientStatus(accountId)) {
+        if (isClientReady(accountId)) {
             console.log(`[BULK] [${accountId}] Já estava ativo. Pulando.`);
             results.push({ accountId, success: true, message: 'Já estava ativo.' });
         } else {
+            // Zombie: está no mapa mas não passou no isClientReady — destrói antes de reiniciar
+            if (getClientStatus(accountId)) {
+                console.log(`[BULK] [${accountId}] Cliente zumbi detectado. Destruindo antes de reiniciar...`);
+                try { await getClientInstance(accountId)?.destroy(); } catch (_) {}
+            }
             console.log(`[BULK] Iniciando ${accountId} (${i + 1}/${accountIds.length})...`);
             const result = await initializeAccount(accountId);
             results.push({ accountId, ...result });
