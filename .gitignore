@@ -11,6 +11,9 @@ orquestrador.sqlite
 # Mídia temporária
 temp_media/
 
+# Frases de aquecimento (cada máquina tem as suas)
+textAquecimento.txt
+
 # Relatórios de disparo (cada máquina gera os seus)
 reports/
 
