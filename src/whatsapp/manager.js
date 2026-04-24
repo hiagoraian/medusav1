@@ -199,6 +199,23 @@ export const initializeAccount = async (accountId, attempt = 1) => {
         // auth_failure já disparou seu próprio retry — não criar segundo Chromium em paralelo
         if (authFailureFired) return { success: false, error: 'auth_failure em andamento' };
 
+        // "The browser is already running" = Chromium órfão da sessão anterior ainda está vivo
+        // e deixou um lock file. Remove o lock e retenta — a sessão em si está intacta.
+        const isBrowserLocked = error?.message?.toLowerCase().includes('already running') ||
+                                error?.message?.toLowerCase().includes('already open');
+        if (isBrowserLocked && attempt < MAX_RETRIES) {
+            const sessionDir = path.resolve(__dirname, '../../.wwebjs_auth', `session-${accountId}`);
+            ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].forEach(lf => {
+                try {
+                    const p = path.join(sessionDir, lf);
+                    if (fs.existsSync(p)) fs.unlinkSync(p);
+                } catch (_) {}
+            });
+            console.log(`[${accountId}] Lock de Chromium removido. Nova tentativa em 3s...`);
+            await new Promise(r => setTimeout(r, 3000));
+            return initializeAccount(accountId, attempt + 1);
+        }
+
         if (isRetryable(error) && attempt < MAX_RETRIES) {
             const delay = RETRY_BASE_DELAY_MS * attempt;
             console.log(`[${accountId}] Erro recuperável. Nova tentativa em ${delay / 1000}s...`);

@@ -74,6 +74,27 @@ process.on('unhandledRejection', handleCrash);
 (async () => {
     console.log('\n🚀 [STARTUP] Iniciando Medusa...\n');
     try {
+        // Remove lock files do Chromium deixados por processos órfãos da sessão anterior.
+        // No Windows, o Node.js não mata os Chromiums filhos ao encerrar — eles ficam rodando
+        // e deixam um SingletonLock que impede a próxima inicialização ("browser already running").
+        const authDir = path.resolve(__dirname, '.wwebjs_auth');
+        if (fs.existsSync(authDir)) {
+            const lockNames = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+            let cleaned = 0;
+            for (let i = 1; i <= 24; i++) {
+                const sessionDir = path.join(authDir, `session-WA-${String(i).padStart(2, '0')}`);
+                if (!fs.existsSync(sessionDir)) continue;
+                lockNames.forEach(lf => {
+                    try {
+                        const p = path.join(sessionDir, lf);
+                        if (fs.existsSync(p)) { fs.unlinkSync(p); cleaned++; }
+                    } catch (_) {}
+                });
+            }
+            if (cleaned > 0)
+                console.log(`🔓 [STARTUP] ${cleaned} lock(s) de Chromium de sessão anterior removidos.`);
+        }
+
         console.log('🔗 [STARTUP] Configurando conexões ADB e ZTE...');
         await setupAllAdbForwards();
         
@@ -207,18 +228,32 @@ app.delete('/api/whatsapp/:accountId', async (req, res) => {
     if (!accountId || !/^WA-\d{2}$/.test(accountId))
         return res.status(400).json({ error: 'ID de conta inválido.' });
 
-    // Destrói o cliente se estiver ativo
+    // Destrói o cliente se estiver ativo e aguarda o Chromium fechar completamente.
+    // Sem o delay, o Windows mantém locks nos arquivos e fs.rmSync retorna EPERM.
     const client = getClientInstance(accountId);
     if (client) {
         try { await client.destroy(); } catch (_) {}
+        await new Promise(r => setTimeout(r, 1500));
     }
 
-    // Remove a pasta de sessão do LocalAuth
     const sessionPath = path.resolve(__dirname, `.wwebjs_auth/session-${accountId}`);
     if (fs.existsSync(sessionPath)) {
-        fs.rmSync(sessionPath, { recursive: true, force: true });
-        console.log(`🗑️ [${accountId}] Cache de sessão removido: ${sessionPath}`);
-        return res.json({ message: `Cache do ${accountId} removido com sucesso.` });
+        try {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+            console.log(`🗑️ [${accountId}] Cache de sessão removido: ${sessionPath}`);
+            return res.json({ message: `Cache do ${accountId} removido com sucesso.` });
+        } catch (err) {
+            if (err.code === 'EPERM' || err.code === 'EBUSY') {
+                // Chromium ainda com arquivos abertos — remove só o lock e avisa
+                ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].forEach(lf => {
+                    try { fs.unlinkSync(path.join(sessionPath, lf)); } catch (_) {}
+                });
+                return res.status(500).json({
+                    error: `Chromium do ${accountId} ainda está fechando. Aguarde alguns segundos e tente novamente.`
+                });
+            }
+            throw err;
+        }
     } else {
         return res.json({ message: `${accountId} não tinha cache salvo.` });
     }
