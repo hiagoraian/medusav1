@@ -1,19 +1,21 @@
 # Dependências
 node_modules/
+package-lock.json
 
 # Variáveis de ambiente (cada máquina tem a sua)
 .env
 
 # Mídia de campanhas (cada máquina faz upload)
 uploads/
+temp_media/
 
 # Frases de aquecimento (cada máquina tem as suas)
 textAquecimento.txt
 
-# Relatórios de disparo (cada máquina gera os seus)
+# Relatórios de disparo (gerados localmente)
 reports/
 
-# Mídia de aquecimento (cada máquina tem as suas, só a estrutura vai pro git)
+# Mídia de aquecimento (só a estrutura vai pro git)
 warmup_media/imagens/*
 warmup_media/audios/*
 !warmup_media/imagens/.gitkeep
@@ -23,7 +25,6 @@ warmup_media/audios/*
 .wwebjs_cache/
 .wwebjs_auth/
 orquestrador.sqlite
-temp_media/
 
 # Claude Code
 .claude/
