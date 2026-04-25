@@ -18,6 +18,12 @@
         .btn-danger { background-color: #d32f2f; }
         .btn-danger:hover { background-color: #b71c1c; }
         .btn-secondary { background-color: #34b7f1; }
+        .adb-row { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 18px; }
+        .adb-result { display: flex; gap: 10px; flex-wrap: wrap; }
+        .adb-card { background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; padding: 8px 14px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+        .adb-card.ok  { border-color: #25D366; background: #f0fff5; }
+        .adb-card.err { border-color: #d32f2f; background: #fff5f5; }
+        .adb-card.warn { border-color: #f57f17; background: #fffde7; }
         .btn-sm { padding: 7px 14px; font-size: 12px; }
         .nav { display: flex; gap: 10px; margin-bottom: 20px; }
         .nav a { padding: 10px 20px; background: #f0f0f0; border-radius: 5px; text-decoration: none; color: #075e54; font-weight: bold; }
@@ -64,6 +70,12 @@
     <div class="nav">
         <a href="index.html">← Painel</a>
         <a href="zaps.html">🔌 Gestão de Zaps</a>
+    </div>
+
+    <!-- Situação ADB -->
+    <div class="adb-row">
+        <button class="btn btn-secondary btn-sm" id="btnAdb" onclick="checkAdb()">📱 Situação ADB</button>
+        <div class="adb-result" id="adbResult"></div>
     </div>
 
     <!-- Status banner (visível só quando rodando) -->
@@ -303,6 +315,40 @@
         await fetch('/api/warmup-chips/stop', { method: 'POST' });
         setRunningUI(false);
         document.getElementById('statusBanner').classList.remove('active');
+    }
+
+    // ── Situação ADB ─────────────────────────────────────────────────────────
+    async function checkAdb() {
+        const btn = document.getElementById('btnAdb');
+        const out = document.getElementById('adbResult');
+        btn.disabled    = true;
+        btn.textContent = '⏳ Verificando...';
+        out.innerHTML   = '';
+
+        try {
+            const res  = await fetch('/api/devices-status');
+            const data = await res.json();
+
+            if (!data.available) {
+                out.innerHTML = `<div class="adb-card err">❌ ADB não encontrado em C:\\adb\\adb.exe</div>`;
+            } else if (!data.devices.length) {
+                out.innerHTML = `<div class="adb-card warn">⚠️ Nenhum ZTE configurado</div>`;
+            } else {
+                out.innerHTML = data.devices.map(d => {
+                    if (!d.serial) {
+                        return `<div class="adb-card warn">⚠️ ${d.description} — serial não configurado</div>`;
+                    }
+                    return d.connected
+                        ? `<div class="adb-card ok">✅ ${d.description}</div>`
+                        : `<div class="adb-card err">❌ ${d.description} — desconectado</div>`;
+                }).join('');
+            }
+        } catch (_) {
+            out.innerHTML = `<div class="adb-card err">❌ Erro ao consultar o servidor</div>`;
+        } finally {
+            btn.disabled    = false;
+            btn.textContent = '📱 Situação ADB';
+        }
     }
 
     // ── Init ─────────────────────────────────────────────────────────────────
