@@ -87,7 +87,7 @@ app.get('/api/zaps-status', async (req, res) => {
         });
 
         const status = [];
-        for (let i = 1; i <= 24; i++) {
+        for (let i = 1; i <= 48; i++) {
             const accountId = `WA-${String(i).padStart(2, '0')}`;
             const state     = instanceMap[accountId] || 'close';
             status.push({ accountId, connected: state === 'open', state });

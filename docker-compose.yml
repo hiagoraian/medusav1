@@ -16,7 +16,7 @@ services:
       CACHE_REDIS_ENABLED: "true"
       CACHE_REDIS_URI: redis://redis:6379/6
       CACHE_REDIS_PREFIX_KEY: evolution
-      QRCODE_LIMIT: "40"
+      QRCODE_LIMIT: "55"
       LANGUAGE: pt-BR
       LOG_LEVEL: ERROR,WARN
     volumes:

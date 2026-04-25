@@ -92,6 +92,13 @@
         <div class="section">
             <h2>Aquecimento de Chips</h2>
             <p>Selecione os Zaps que deseja aquecer (mínimo 2):</p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectGroup('A')">Selecionar Grupo A</button>
+                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectGroup('B')">Selecionar Grupo B</button>
+                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectGroup('C')">Selecionar Grupo C</button>
+                <button class="btn" style="padding:6px 12px;font-size:12px;background:#555;" onclick="selectGroup('all')">Todos</button>
+                <button class="btn" style="padding:6px 12px;font-size:12px;background:#999;" onclick="selectGroup('none')">Limpar</button>
+            </div>
             <div class="zap-list" id="warmupCheckboxes"></div>
             <div class="warmup-level-row">
                 <label for="warmupLevel" style="font-weight:bold;">Nível de aquecimento:</label>
@@ -313,21 +320,43 @@
         // ── Aquecimento ───────────────────────────────────────
         let _zapsOnlineSet = new Set();
 
+        function getZapGroup(i) {
+            const pos = (i - 1) % 12;
+            if (pos < 4) return 'A';
+            if (pos < 8) return 'B';
+            return 'C';
+        }
+
+        function getZapZte(i) { return Math.ceil(i / 12); }
+
         function populateWarmupCheckboxes(onlineSet = new Set()) {
             _zapsOnlineSet = onlineSet;
             const container = document.getElementById('warmupCheckboxes');
             container.innerHTML = '';
-            for (let i = 1; i <= 24; i++) {
-                const id      = `WA-${String(i).padStart(2, '0')}`;
-                const online  = onlineSet.has(id);
-                const label   = document.createElement('label');
-                label.style.cssText = 'display:flex;align-items:center;padding:10px;background:#fff;border:1px solid #ccc;border-radius:5px;cursor:pointer;gap:6px;';
+            for (let i = 1; i <= 48; i++) {
+                const id     = `WA-${String(i).padStart(2, '0')}`;
+                const online = onlineSet.has(id);
+                const group  = getZapGroup(i);
+                const zte    = getZapZte(i);
+                const label  = document.createElement('label');
+                label.style.cssText = 'display:flex;align-items:center;padding:8px 10px;background:#fff;border:1px solid #ccc;border-radius:5px;cursor:pointer;gap:6px;font-size:13px;';
                 label.innerHTML = `
                     <input type="checkbox" class="warmup-cb" value="${id}">
                     <span class="warmup-dot ${online ? 'online' : 'offline'}"></span>
-                    <span>${id}</span>`;
+                    <span style="font-weight:bold;">${id}</span>
+                    <span style="color:#888;font-size:11px;">ZTE${zte}-${group}</span>`;
                 container.appendChild(label);
             }
+        }
+
+        function selectGroup(filter) {
+            document.querySelectorAll('.warmup-cb').forEach((cb, idx) => {
+                const i     = idx + 1;
+                const group = getZapGroup(i);
+                if      (filter === 'all')  cb.checked = true;
+                else if (filter === 'none') cb.checked = false;
+                else                        cb.checked = (group === filter);
+            });
         }
 
         async function startWarmup() {
