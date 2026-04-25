@@ -188,11 +188,8 @@ export const rotateMobileIPsStaggered = async (activeZteIds = ['ZTE1', 'ZTE2', '
     console.log('✅ [ROTATE] Rotação de IPs concluída.\n');
 };
 
-// Compat alias mantido para chamadas legadas no orchestrator
-export const rotateMobileIPs = () => rotateMobileIPsStaggered();
-
 export default {
     ZTE_CONFIG, getZteForAccount, checkAdbAvailability, checkDeviceConnection,
     checkAllDevicesStatus, setupAllAdbForwards, isMobileConnectionActive,
-    getProxyConfigForAccount, rotateZteIP, rotateMobileIPsStaggered, rotateMobileIPs,
+    getProxyConfigForAccount, rotateZteIP, rotateMobileIPsStaggered,
 };

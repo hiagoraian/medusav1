@@ -46,11 +46,4 @@ export const generateCampaignReport = async (cycleId) => {
     return REPORTS_DIR;
 };
 
-/** Retrocompatibilidade — alias para generateCampaignReport */
-export const generateCycleReport  = generateCampaignReport;
-export const generateFailureList  = async (cycleId) => {
-    await generateCampaignReport(cycleId);
-    return path.join(REPORTS_DIR, 'falhas.txt');
-};
-
-export default { generateCampaignReport, generateCycleReport, generateFailureList };
+export default { generateCampaignReport };

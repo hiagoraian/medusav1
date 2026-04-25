@@ -17,15 +17,14 @@ export const query = (text, params) => pool.query(text, params);
 export const initSchema = async () => {
     await pool.query(`
         CREATE TABLE IF NOT EXISTS messages_queue (
-            id          SERIAL PRIMARY KEY,
-            campaign_id INT,
-            phone_number VARCHAR(50) NOT NULL,
-            status       VARCHAR(50) DEFAULT 'pendente',
-            whatsapp_id  VARCHAR(50),
-            cycle_id     INT,
+            id            SERIAL PRIMARY KEY,
+            phone_number  VARCHAR(50) NOT NULL,
+            status        VARCHAR(50) DEFAULT 'pendente',
+            whatsapp_id   VARCHAR(50),
+            cycle_id      INT,
             error_message TEXT,
-            sent_at      TIMESTAMPTZ,
-            created_at   TIMESTAMPTZ DEFAULT NOW()
+            sent_at       TIMESTAMPTZ,
+            created_at    TIMESTAMPTZ DEFAULT NOW()
         );
 
         CREATE TABLE IF NOT EXISTS dispatch_cycles (
@@ -40,6 +39,7 @@ export const initSchema = async () => {
 
         CREATE INDEX IF NOT EXISTS idx_mq_status  ON messages_queue(status);
         CREATE INDEX IF NOT EXISTS idx_mq_cycle   ON messages_queue(cycle_id);
+        CREATE INDEX IF NOT EXISTS idx_mq_phone   ON messages_queue(phone_number);
     `);
     console.log('✅ [PG] Schema sincronizado.');
 };

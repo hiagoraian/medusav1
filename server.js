@@ -5,7 +5,7 @@ import multer from 'multer';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-import { initSchema }                              from './src/database/postgres.js';
+import { initSchema, query }                        from './src/database/postgres.js';
 import { processExcelFiles }                       from './src/services/excelProcessor.js';
 import {
     addContactsToQueue, countPending, createCycle,
@@ -204,8 +204,7 @@ app.get('/api/check-interrupted', async (req, res) => {
     try {
         const cycle = await getInterruptedCycle();
         if (!cycle) return res.json({ interrupted: null });
-        const db = (await import('./src/database/postgres.js')).default;
-        const { rows } = await db.query(
+        const { rows } = await query(
             `SELECT COUNT(*) AS pending FROM messages_queue WHERE status = 'pendente'`
         );
         res.json({ interrupted: { ...cycle, pending: parseInt(rows[0].pending, 10) } });

@@ -51,11 +51,11 @@ export const createCycle = async (totalMessages) => {
 };
 
 export const updateCycleStats = async (cycleId, sentCount, failCount, status = 'em_andamento') => {
-    const endTime = (status === 'concluido' || status === 'interrompido') ? 'NOW()' : 'NULL';
     await query(
         `UPDATE dispatch_cycles
          SET sent_count = sent_count + $1, fail_count = fail_count + $2,
-             status = $3, end_time = ${endTime}
+             status = $3,
+             end_time = CASE WHEN $3 IN ('concluido', 'interrompido') THEN NOW() ELSE NULL END
          WHERE id = $4`,
         [sentCount, failCount, status, cycleId]
     );
