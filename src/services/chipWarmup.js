@@ -30,11 +30,12 @@ const LEVEL_CONFIG = {
 };
 
 let isWarmupRunning = false;
-let _textCache      = null;
 
-// ── Carregamento de recursos ──────────────────────────────────────────────────
+// ── Cache de recursos (carregados uma única vez por sessão) ───────────────────
+const _cache = { texts: null, images: null, audios: null };
+
 const loadTexts = () => {
-    if (_textCache) return _textCache;
+    if (_cache.texts) return _cache.texts;
     try {
         if (!fs.existsSync(WARMUP_TEXT_PATH)) {
             const defaults = [
@@ -44,27 +45,29 @@ const loadTexts = () => {
                 'Haha isso é verdade!', 'Que interessante!', 'Pode ser...', 'Com certeza!',
             ];
             fs.writeFileSync(WARMUP_TEXT_PATH, defaults.join('\n'), 'utf8');
-            _textCache = defaults;
+            _cache.texts = defaults;
         } else {
-            _textCache = fs.readFileSync(WARMUP_TEXT_PATH, 'utf8')
+            _cache.texts = fs.readFileSync(WARMUP_TEXT_PATH, 'utf8')
                 .split('\n').map(l => l.trim()).filter(l => l.length > 0);
         }
     } catch (_) {
-        _textCache = ['Oi', 'Tudo bem?', 'Sim', 'Ok'];
+        _cache.texts = ['Oi', 'Tudo bem?', 'Sim', 'Ok'];
     }
-    return _textCache;
+    return _cache.texts;
 };
 
-const listMediaFiles = (dir) => {
+// Lê o diretório uma única vez e reutiliza — evita readdirSync em cada mensagem.
+const readDir = (dir) => {
     try {
         if (!fs.existsSync(dir)) return [];
         return fs.readdirSync(dir)
             .filter(f => !f.startsWith('.'))
             .map(f => path.join(dir, f));
-    } catch (_) {
-        return [];
-    }
+    } catch (_) { return []; }
 };
+
+const getImages = () => { _cache.images ??= readDir(WARMUP_IMAGES_DIR); return _cache.images; };
+const getAudios = () => { _cache.audios ??= readDir(WARMUP_AUDIOS_DIR); return _cache.audios; };
 
 const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
@@ -81,15 +84,20 @@ const isReady = async (accountId) => {
     } catch (_) { return false; }
 };
 
-/**
- * Obtém o número do dono da instância (para saber para onde mandar resposta).
- */
+// Cache de donos por accountId: evita chamar fetchInstances() N vezes por grupo.
+// Uma única chamada popula todos — os demais são lookups instantâneos no Map.
+const _ownerCache = new Map();
+
 const getOwnerNumber = async (accountId) => {
+    if (_ownerCache.has(accountId)) return _ownerCache.get(accountId);
     try {
         const instances = await evolution.fetchInstances();
-        const inst = instances.find(i => (i.instanceName || i.name) === accountId);
-        const owner = inst?.instance?.owner || inst?.owner || null;
-        return owner ? String(owner).replace(/\D/g, '') : null;
+        for (const inst of instances) {
+            const name  = inst.instanceName || inst.name;
+            const owner = inst?.instance?.owner || inst?.owner || null;
+            if (name && owner) _ownerCache.set(name, String(owner).replace(/\D/g, ''));
+        }
+        return _ownerCache.get(accountId) || null;
     } catch (_) { return null; }
 };
 
@@ -98,8 +106,8 @@ const sendWarmupMessage = async (fromId, toNumber, level) => {
     const cfg    = LEVEL_CONFIG[level] || LEVEL_CONFIG[5];
     const texts  = loadTexts();
     const text   = processSpintax(pickRandom(texts));
-    const images = listMediaFiles(WARMUP_IMAGES_DIR);
-    const audios = listMediaFiles(WARMUP_AUDIOS_DIR);
+    const images = getImages();
+    const audios = getAudios();
 
     const sendImage = images.length > 0 && Math.random() < cfg.imageChance;
     const sendAudio = !sendImage && audios.length > 0 && Math.random() < cfg.audioChance;

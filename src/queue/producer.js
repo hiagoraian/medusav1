@@ -2,27 +2,39 @@ import amqplib from 'amqplib';
 
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://medusa:medusa@localhost:5672';
 
-let _connection = null;
-let _channel    = null;
+// Cacheamos a Promise, não o valor resolvido.
+// Isso elimina a race condition: chamadas concorrentes recebem a mesma Promise
+// em vez de criarem conexões duplicadas.
+let _channelPromise = null;
 
-const getChannel = async () => {
-    if (_channel) return _channel;
-    _connection = await amqplib.connect(RABBITMQ_URL);
-    _channel    = await _connection.createChannel();
-    _connection.on('error', () => { _channel = null; _connection = null; });
-    _connection.on('close', () => { _channel = null; _connection = null; });
-    return _channel;
+const getChannel = () => {
+    if (_channelPromise) return _channelPromise;
+
+    _channelPromise = (async () => {
+        const conn = await amqplib.connect(RABBITMQ_URL);
+        const ch   = await conn.createChannel();
+
+        // Qualquer erro na connection OU no channel invalida o cache,
+        // forçando reconexão na próxima chamada.
+        const reset = () => { _channelPromise = null; };
+        conn.on('error', reset);
+        conn.on('close', reset);
+        ch.on('error',   reset);
+        ch.on('close',   reset);
+
+        return ch;
+    })();
+
+    return _channelPromise;
 };
 
-const queueName = (accountId) => `medusa.${accountId}`;
+const queueName  = (accountId) => `medusa.${accountId}`;
 
-const assertQueue = async (ch, accountId) => {
-    await ch.assertQueue(queueName(accountId), { durable: true });
-};
+const assertQueue = async (ch, accountId) =>
+    ch.assertQueue(queueName(accountId), { durable: true });
 
 /**
  * Publica um lote de tarefas no RabbitMQ, distribuindo round-robin entre as contas ativas.
- * Cada mensagem contém só o id e o telefone — o worker recebe o resto via campaignConfig.
  */
 export const publishBulk = async (pendingRows, activeAccounts) => {
     const ch = await getChannel();
@@ -43,7 +55,7 @@ export const publishBulk = async (pendingRows, activeAccounts) => {
 };
 
 /**
- * Esvazia todas as filas dos accounts informados (usado no stop/suspend de campanha).
+ * Esvazia as filas dos accounts informados (parada/suspensão de campanha).
  */
 export const purgeQueues = async (activeAccounts) => {
     try {
