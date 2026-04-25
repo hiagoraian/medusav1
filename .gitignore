@@ -1,15 +1,11 @@
 # Dependências
 node_modules/
 
-# Cache de sessões do WhatsApp (cada máquina faz login do zero)
-.wwebjs_auth/
-.wwebjs_cache/
+# Variáveis de ambiente (cada máquina tem a sua)
+.env
 
-# Banco de dados local (cada máquina tem o seu)
-orquestrador.sqlite
-
-# Mídia temporária
-temp_media/
+# Mídia de campanhas (cada máquina faz upload)
+uploads/
 
 # Frases de aquecimento (cada máquina tem as suas)
 textAquecimento.txt

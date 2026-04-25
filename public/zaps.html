@@ -5,21 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestão de Zaps - Medusa</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030;}
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030; }
         .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
         h1 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 0; }
-        .btn { background-color: #25D366; color: white; border: none; padding: 10px 20px; font-size: 14px; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s;}
+        .btn { background-color: #25D366; color: white; border: none; padding: 10px 20px; font-size: 14px; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s; }
         .btn:hover { background-color: #128C7E; }
         .btn:disabled { background-color: #ccc; cursor: not-allowed; }
         .btn-secondary { background-color: #34b7f1; }
         .btn-warmup { background-color: #ff6f00; }
         .btn-danger { background-color: #d32f2f; }
+        .btn-reconnect-all { background-color: #075e54; }
+        .btn-reconnect-all:hover { background-color: #054c44; }
         .zap-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }
         .zap-card { background: #f9f9f9; border: 1px solid #ddd; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .zap-card h3 { margin: 0 0 10px; color: #075e54; }
         .status-badge { display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 12px; font-weight: bold; margin: 10px 0; }
-        .status-online { background-color: #dcf8c6; color: #075e54; }
-        .status-offline { background-color: #ffebee; color: #d32f2f; }
+        .status-online     { background-color: #dcf8c6; color: #075e54; }
+        .status-offline    { background-color: #ffebee; color: #d32f2f; }
+        .status-connecting { background-color: #fff9c4; color: #f57f17; }
         .btn-group { display: flex; gap: 10px; margin-top: 10px; }
         .btn-group .btn { flex: 1; padding: 8px; font-size: 12px; }
         .section { margin-bottom: 30px; padding: 20px; background: #f9f9f9; border-radius: 8px; border: 1px solid #ddd; }
@@ -32,14 +35,36 @@
         .reconnect-bar .progress-track { background: #e0e0e0; border-radius: 20px; height: 10px; overflow: hidden; margin: 8px 0; }
         .reconnect-bar .progress-fill  { height: 100%; width: 0%; background: #25D366; border-radius: 20px; transition: width 0.4s ease; }
         .reconnect-bar .progress-label { font-size: 13px; color: #555; }
-        .btn-reconnect-all { background-color: #075e54; }
-        .btn-reconnect-all:hover { background-color: #054c44; }
+
+        /* Modal QR Code */
+        .qr-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .qr-modal.active { display: flex; }
+        .qr-box { background: #fff; padding: 30px; border-radius: 16px; text-align: center; max-width: 360px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        .qr-box h2 { color: #075e54; margin-top: 0; }
+        .qr-box img { width: 260px; height: 260px; border: 4px solid #25D366; border-radius: 8px; margin: 15px 0; }
+        .qr-box .qr-hint { font-size: 13px; color: #666; margin-bottom: 15px; }
+        .qr-box .qr-status { font-size: 14px; font-weight: bold; color: #555; margin-bottom: 15px; }
+        .qr-spinner { border: 4px solid #f0f0f0; border-top: 4px solid #25D366; border-radius: 50%; width: 48px; height: 48px; animation: spin 0.8s linear infinite; margin: 20px auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
+    <!-- Modal QR Code -->
+    <div class="qr-modal" id="qrModal">
+        <div class="qr-box">
+            <h2 id="qrTitle">📱 Escaneie o QR Code</h2>
+            <div id="qrContent">
+                <div class="qr-spinner"></div>
+                <p class="qr-status">Gerando QR Code...</p>
+            </div>
+            <p class="qr-hint" id="qrHint">Abra o WhatsApp no celular → Dispositivos Conectados → Conectar dispositivo</p>
+            <button class="btn btn-danger" onclick="closeQRModal()">✖ Fechar</button>
+        </div>
+    </div>
+
     <div class="container">
         <h1>🔌 Gestão de Zaps (1-24)</h1>
-        
+
         <div class="nav">
             <a href="index.html">← Voltar ao Painel</a>
         </div>
@@ -67,96 +92,195 @@
                 <button id="btnStartWarmup" class="btn btn-warmup" style="flex: 2;" onclick="startWarmup()">🔥 Iniciar Aquecimento</button>
                 <button id="btnStopWarmup" class="btn btn-danger" style="flex: 1;" onclick="stopWarmup()" disabled>🛑 Parar</button>
             </div>
-            <div id="warmupResult" class="info-box" style="display: none; margin-top: 15px;"></div>
+            <div id="warmupResult" class="info-box" style="display: none;"></div>
         </div>
 
         <div class="section">
             <h2>Manutenção</h2>
             <div class="btn-group">
                 <button class="btn btn-secondary" onclick="checkDevices()">📱 Status ADB</button>
-                <button class="btn btn-danger" onclick="clearAllCache()">🧹 Limpar Cache</button>
             </div>
             <div id="maintenanceResult" class="info-box" style="display: none; margin-top: 15px;"></div>
         </div>
     </div>
 
     <script>
-        let isWarmupActive = false;
+        let qrPollInterval = null;
+        let currentQrAccount = null;
 
+        // ── QR Modal ──────────────────────────────────────────
+        function openQRModal(accountId) {
+            currentQrAccount = accountId;
+            document.getElementById('qrTitle').textContent = `📱 ${accountId} — Escaneie o QR Code`;
+            document.getElementById('qrHint').textContent = 'Abra o WhatsApp → Dispositivos Conectados → Conectar dispositivo';
+            document.getElementById('qrContent').innerHTML = `<div class="qr-spinner"></div><p class="qr-status">Gerando QR Code...</p>`;
+            document.getElementById('qrModal').classList.add('active');
+            startQRPolling(accountId);
+        }
+
+        function closeQRModal() {
+            clearInterval(qrPollInterval);
+            qrPollInterval = null;
+            currentQrAccount = null;
+            document.getElementById('qrModal').classList.remove('active');
+        }
+
+        function startQRPolling(accountId) {
+            clearInterval(qrPollInterval);
+            pollQR(accountId); // imediato
+            qrPollInterval = setInterval(() => pollQR(accountId), 4000);
+        }
+
+        async function pollQR(accountId) {
+            try {
+                const res  = await fetch(`/api/whatsapp/qrcode/${accountId}`);
+                const data = await res.json();
+
+                if (data.state === 'open') {
+                    // Conectado — fecha o modal e atualiza cards
+                    clearInterval(qrPollInterval);
+                    document.getElementById('qrContent').innerHTML = `<p style="font-size:48px">✅</p><p class="qr-status" style="color:#075e54;">Conectado com sucesso!</p>`;
+                    setTimeout(() => { closeQRModal(); refreshStatus(); }, 2000);
+                    return;
+                }
+
+                if (data.qrcode) {
+                    document.getElementById('qrContent').innerHTML = `
+                        <img src="${data.qrcode}" alt="QR Code" />
+                        <p class="qr-status">Aguardando leitura...</p>`;
+                } else {
+                    document.getElementById('qrContent').innerHTML = `<div class="qr-spinner"></div><p class="qr-status">Aguardando QR Code...</p>`;
+                }
+            } catch (_) {}
+        }
+
+        // ── Status dos Zaps ───────────────────────────────────
         async function refreshStatus() {
             try {
                 const res  = await fetch('/api/zaps-status');
                 const data = await res.json();
                 renderZapCards(data);
-            } catch (error) {
-                console.error('Erro ao atualizar status:', error);
+            } catch (err) {
+                console.error('Erro ao atualizar status:', err);
             }
         }
 
+        function renderZapCards(data) {
+            const container = document.getElementById('zapsList');
+            container.innerHTML = '';
+            data.forEach(zap => {
+                const card = document.createElement('div');
+                card.className = 'zap-card';
+
+                let statusClass, statusText;
+                if (zap.state === 'open') {
+                    statusClass = 'status-online';    statusText = '✅ Ativo';
+                } else if (zap.state === 'connecting') {
+                    statusClass = 'status-connecting'; statusText = '⏳ Conectando';
+                } else {
+                    statusClass = 'status-offline';    statusText = '❌ Inativo';
+                }
+
+                card.innerHTML = `
+                    <h3>${zap.accountId}</h3>
+                    <div class="status-badge ${statusClass}">${statusText}</div>
+                    <div class="btn-group">
+                        <button class="btn btn-secondary" onclick="connectZap('${zap.accountId}', '${zap.state}')">Conectar</button>
+                        <button class="btn btn-danger"    onclick="deleteZap('${zap.accountId}')" title="Remove sessão">🗑️</button>
+                    </div>`;
+                container.appendChild(card);
+            });
+        }
+
+        // ── Conectar Zap ──────────────────────────────────────
+        async function connectZap(accountId, currentState) {
+            if (currentState === 'open') {
+                alert(`${accountId} já está conectado.`);
+                return;
+            }
+            try {
+                const res  = await fetch('/api/whatsapp/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accountId }),
+                });
+                const data = await res.json();
+
+                if (data.connected) {
+                    alert(`✅ ${accountId} já está conectado.`);
+                    refreshStatus();
+                    return;
+                }
+
+                // Exibe modal com QR code
+                openQRModal(accountId);
+            } catch (_) {
+                alert('Erro ao conectar.');
+            }
+        }
+
+        // ── Deletar Zap ───────────────────────────────────────
+        async function deleteZap(accountId) {
+            if (!confirm(`⚠️ Isso vai desconectar e apagar a sessão de ${accountId}.\n\nEle precisará escanear o QR Code novamente.\n\nConfirmar?`)) return;
+            try {
+                const res  = await fetch(`/api/whatsapp/${accountId}`, { method: 'DELETE' });
+                const data = await res.json();
+                alert(data.message || data.error);
+                refreshStatus();
+            } catch (_) {
+                alert('Erro ao remover o Zap.');
+            }
+        }
+
+        // ── Reconectar Todos ──────────────────────────────────
         async function reconnectAll() {
             const btn   = document.getElementById('btnReconnectAll');
             const bar   = document.getElementById('reconnectBar');
             const fill  = document.getElementById('reconnectFill');
             const label = document.getElementById('reconnectLabel');
 
-            // Busca só os zaps que têm cache salvo — evita abrir QR Code para contas nunca conectadas
-            let accountsWithCache = [];
+            let allAccounts = [];
             try {
                 const res  = await fetch('/api/zaps-status');
                 const data = await res.json();
-                accountsWithCache = data.filter(z => z.hasCache).map(z => z.accountId);
+                // Inclui todos (a Evolution auto-reconecta quem já tinha sessão)
+                allAccounts = data.map(z => z.accountId);
                 renderZapCards(data);
-            } catch (e) {
-                label.innerText = '❌ Erro ao verificar status.';
+            } catch (_) {
+                label.textContent = '❌ Erro ao verificar status.';
                 return;
             }
 
-            if (accountsWithCache.length === 0) {
-                alert('Nenhum Zap com cache salvo encontrado.\nUse "Conectar" individualmente para escanear o QR Code de cada um.');
-                return;
-            }
-
-            const total = accountsWithCache.length;
+            const total = allAccounts.length;
             btn.disabled = true;
             btn.innerHTML = '⏳ Reconectando...';
             bar.style.display = 'block';
             fill.style.width = '0%';
-            label.innerText = `Iniciando ${total} Zap(s) com cache... 0 / ${total} conectados`;
+            label.textContent = `Iniciando ${total} instâncias... 0 / ${total} conectadas`;
 
-            try {
-                await fetch('/api/whatsapp/start-bulk', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ accounts: accountsWithCache })
-                });
-            } catch (e) {
-                label.innerText = '❌ Erro ao acionar o servidor.';
-                btn.disabled = false;
-                btn.innerHTML = '⚡ Reconectar Todos';
-                return;
-            }
+            await fetch('/api/whatsapp/start-bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ accounts: allAccounts }),
+            });
 
-            // Polling: atualiza a cada 6s enquanto o servidor processa em background
             let pollCount = 0;
-            const MAX_POLLS = 60; // até 6 min de espera total
-            const pollInterval = setInterval(async () => {
+            const poll = setInterval(async () => {
                 pollCount++;
                 try {
                     const res  = await fetch('/api/zaps-status');
                     const data = await res.json();
-                    // Conta apenas os que tinham cache (são os que estão sendo reconectados)
-                    const connected = data.filter(z => z.hasCache && z.connected).length;
+                    const connected = data.filter(z => z.state === 'open').length;
                     const pct = Math.round((connected / total) * 100);
-
                     fill.style.width  = pct + '%';
-                    label.innerText   = `${connected} / ${total} conectados (${pct}%)`;
+                    label.textContent = `${connected} / ${total} conectados (${pct}%)`;
                     renderZapCards(data);
 
-                    if (connected >= total || pollCount >= MAX_POLLS) {
-                        clearInterval(pollInterval);
-                        label.innerText = connected >= total
-                            ? `✅ Todos os ${total} Zaps reconectados!`
-                            : `⚠️ ${connected} / ${total} conectados. Verifique o terminal.`;
+                    if (connected >= total || pollCount >= 60) {
+                        clearInterval(poll);
+                        label.textContent = connected >= total
+                            ? `✅ Todos os ${total} Zaps conectados!`
+                            : `⚠️ ${connected} / ${total} conectados.`;
                         btn.disabled = false;
                         btn.innerHTML = '⚡ Reconectar Todos';
                     }
@@ -164,169 +288,73 @@
             }, 6000);
         }
 
-        function renderZapCards(data) {
-            const zapsList = document.getElementById('zapsList');
-            zapsList.innerHTML = '';
-            data.forEach(zap => {
-                const card = document.createElement('div');
-                card.className = 'zap-card';
-                const statusClass = zap.connected ? 'status-online' : 'status-offline';
-                const statusText  = zap.connected ? '✅ Ativo' : '❌ Inativo';
-                const cacheLabel  = zap.hasCache
-                    ? '<span style="font-size:11px;color:#075e54;">💾 Cache OK</span>'
-                    : '<span style="font-size:11px;color:#999;">🔑 Sem cache</span>';
-                card.innerHTML = `
-                    <h3>${zap.accountId}</h3>
-                    <div class="status-badge ${statusClass}">${statusText}</div>
-                    <div style="margin:4px 0;">${cacheLabel}</div>
-                    <div class="btn-group">
-                        <button class="btn btn-secondary" onclick="connectZap('${zap.accountId}', ${!!zap.hasCache})">Conectar</button>
-                        <button class="btn btn-danger" onclick="deleteZap('${zap.accountId}')" title="Apaga o cache de sessão">🗑️</button>
-                    </div>
-                `;
-                zapsList.appendChild(card);
-            });
-        }
-
-        async function deleteZap(accountId) {
-            if (!confirm(`⚠️ Isso vai apagar o cache do ${accountId} e desconectá-lo.\n\nEle precisará escanear o QR Code novamente.\n\nConfirmar?`)) return;
-            try {
-                const res  = await fetch(`/api/whatsapp/${accountId}`, { method: 'DELETE' });
-                const data = await res.json();
-                alert(data.message || data.error);
-                refreshStatus();
-            } catch (e) {
-                alert('Erro ao excluir o Zap.');
-            }
-        }
-
-        async function connectZap(accountId, hasCache) {
-            const msg = hasCache
-                ? `Restaurando sessão do ${accountId} a partir do cache...\nO sistema vai reconectar automaticamente. Acompanhe o terminal.`
-                : `${accountId} não tem cache salvo.\nO terminal vai exibir um QR Code — escaneie com o celular.`;
-            alert(msg);
-            try {
-                await fetch('/api/whatsapp/start', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ accountId })
-                });
-                // Cache: espera mais para o Chromium carregar a sessão antes de atualizar
-                setTimeout(refreshStatus, hasCache ? 8000 : 3000);
-            } catch (error) {
-                alert('Erro ao conectar.');
-            }
-        }
-
+        // ── Aquecimento ───────────────────────────────────────
         function populateWarmupCheckboxes() {
             const container = document.getElementById('warmupCheckboxes');
             container.innerHTML = '';
             for (let i = 1; i <= 24; i++) {
-                const num = i.toString().padStart(2, '0');
-                const id = `WA-${num}`;
+                const id = `WA-${String(i).padStart(2, '0')}`;
                 const label = document.createElement('label');
-                label.style.display = 'flex';
-                label.style.alignItems = 'center';
-                label.style.padding = '10px';
-                label.style.background = '#fff';
-                label.style.border = '1px solid #ccc';
-                label.style.borderRadius = '5px';
-                label.style.cursor = 'pointer';
-                label.innerHTML = `<input type="checkbox" class="warmup-cb" value="${id}" style="margin-right: 10px;"> <span>${id}</span>`;
+                label.style.cssText = 'display:flex;align-items:center;padding:10px;background:#fff;border:1px solid #ccc;border-radius:5px;cursor:pointer;';
+                label.innerHTML = `<input type="checkbox" class="warmup-cb" value="${id}" style="margin-right:10px;"> <span>${id}</span>`;
                 container.appendChild(label);
             }
         }
 
         async function startWarmup() {
             const selected = Array.from(document.querySelectorAll('.warmup-cb:checked')).map(cb => cb.value);
-            if (selected.length < 2) {
-                alert('Selecione pelo menos 2 Zaps para aquecimento.');
-                return;
-            }
+            if (selected.length < 2) { alert('Selecione pelo menos 2 Zaps.'); return; }
 
-            const btnStart = document.getElementById('btnStartWarmup');
-            const btnStop = document.getElementById('btnStopWarmup');
-            
-            btnStart.innerHTML = '⏳ Aquecendo...';
-            btnStart.disabled = true;
-            btnStop.disabled = false;
-            isWarmupActive = true;
+            document.getElementById('btnStartWarmup').innerHTML = '⏳ Aquecendo...';
+            document.getElementById('btnStartWarmup').disabled = true;
+            document.getElementById('btnStopWarmup').disabled  = false;
 
             try {
-                const res = await fetch('/api/warmup-chips/start', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ accounts: JSON.stringify(selected) })
+                const res  = await fetch('/api/warmup-chips/start', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accounts: JSON.stringify(selected) }),
                 });
                 const data = await res.json();
-                document.getElementById('warmupResult').style.display = 'block';
-                document.getElementById('warmupResult').innerText = data.message || data.error;
-            } catch (error) {
-                document.getElementById('warmupResult').style.display = 'block';
-                document.getElementById('warmupResult').innerText = 'Erro ao iniciar aquecimento.';
-                btnStart.innerHTML = '🔥 Iniciar Aquecimento';
-                btnStart.disabled = false;
-                btnStop.disabled = true;
-                isWarmupActive = false;
+                const box = document.getElementById('warmupResult');
+                box.style.display = 'block';
+                box.textContent = data.message || data.error;
+            } catch (_) {
+                document.getElementById('btnStartWarmup').innerHTML = '🔥 Iniciar Aquecimento';
+                document.getElementById('btnStartWarmup').disabled = false;
+                document.getElementById('btnStopWarmup').disabled  = true;
             }
         }
 
         async function stopWarmup() {
-            const btnStart = document.getElementById('btnStartWarmup');
-            const btnStop = document.getElementById('btnStopWarmup');
-            
-            try {
-                const res = await fetch('/api/warmup-chips/stop', { method: 'POST' });
-                const data = await res.json();
-                document.getElementById('warmupResult').innerText = data.message || 'Aquecimento parado.';
-            } catch (error) {
-                alert('Erro ao parar aquecimento.');
-            } finally {
-                btnStart.innerHTML = '🔥 Iniciar Aquecimento';
-                btnStart.disabled = false;
-                btnStop.disabled = true;
-                isWarmupActive = false;
-            }
+            await fetch('/api/warmup-chips/stop', { method: 'POST' });
+            document.getElementById('warmupResult').textContent = 'Aquecimento parado.';
+            document.getElementById('btnStartWarmup').innerHTML = '🔥 Iniciar Aquecimento';
+            document.getElementById('btnStartWarmup').disabled = false;
+            document.getElementById('btnStopWarmup').disabled  = true;
         }
 
+        // ── Manutenção ────────────────────────────────────────
         async function checkDevices() {
             try {
-                const res = await fetch('/api/devices-status');
+                const res  = await fetch('/api/devices-status');
                 const data = await res.json();
-                document.getElementById('maintenanceResult').style.display = 'block';
+                const box  = document.getElementById('maintenanceResult');
+                box.style.display = 'block';
                 if (data.available) {
-                    let html = '<strong>Status dos Dispositivos ADB:</strong><br>';
-                    data.devices.forEach(device => {
-                        const icon = device.connected ? '✅' : '❌';
-                        html += `${icon} Porta ${device.port} - ${device.deviceId}: ${device.connected ? 'Conectado' : 'Desconectado'}<br>`;
-                    });
-                    document.getElementById('maintenanceResult').innerHTML = html;
+                    box.innerHTML = '<strong>Dispositivos ADB:</strong><br>' +
+                        data.devices.map(d => `${d.connected ? '✅' : '❌'} Porta ${d.port} — ${d.deviceId}`).join('<br>');
                 } else {
-                    document.getElementById('maintenanceResult').innerText = '⚠️ ADB não está disponível.';
+                    box.textContent = '⚠️ ADB não disponível.';
                 }
-            } catch (error) {
-                document.getElementById('maintenanceResult').innerText = 'Erro ao verificar dispositivos.';
+            } catch (_) {
+                document.getElementById('maintenanceResult').textContent = 'Erro ao verificar dispositivos.';
             }
         }
 
-        async function clearAllCache() {
-            if (!confirm('⚠️ Isso vai desconectar TODOS os Zaps. Tem certeza?')) return;
-            try {
-                const res = await fetch('/api/clear-cache', { method: 'POST' });
-                const data = await res.json();
-                document.getElementById('maintenanceResult').style.display = 'block';
-                document.getElementById('maintenanceResult').innerText = data.message || data.error;
-            } catch (error) {
-                document.getElementById('maintenanceResult').innerText = 'Erro ao limpar cache.';
-            }
-        }
-
-        // Inicializar
+        // ── Init ──────────────────────────────────────────────
         populateWarmupCheckboxes();
         refreshStatus();
-        setInterval(() => {
-            if (!isWarmupActive) refreshStatus();
-        }, 10000);
+        setInterval(refreshStatus, 10000);
     </script>
 </body>
 </html>
