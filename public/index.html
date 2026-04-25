@@ -6,7 +6,7 @@
     <title>Medusa — Orquestrador de Disparos</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030; }
-        .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+        .container { max-width: 960px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
         h1 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 0; }
         h2 { color: #075e54; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; margin-top: 0; }
         .section { margin-bottom: 20px; padding: 20px; background: #f9f9f9; border-radius: 8px; border: 1px solid #ddd; }
@@ -19,20 +19,21 @@
         .btn-danger:hover { background-color: #b71c1c; }
         .btn-gray { background-color: #666; }
         .btn-gray:hover { background-color: #444; }
+        .btn-sm { padding: 7px 14px; font-size: 13px; width: auto; }
         .info-box { background-color: #dcf8c6; padding: 15px; border-radius: 5px; margin-top: 15px; border-left: 5px solid #25D366; }
-        .grid-checkboxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 10px; margin-top: 15px; }
-        .grid-checkboxes label { background: #fff; border: 1px solid #ccc; padding: 10px; border-radius: 5px; cursor: pointer; text-align: center; font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .grid-checkboxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(82px, 1fr)); gap: 8px; margin-top: 15px; }
+        .grid-checkboxes label { background: #fff; border: 1px solid #ccc; padding: 8px 6px; border-radius: 5px; cursor: pointer; text-align: center; font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
         .grid-checkboxes label:has(input:checked) { border-color: #25D366; background: #f0fff5; }
         .form-group { margin-top: 15px; }
-        .form-group label { display: block; font-weight: bold; margin-bottom: 5px; }
+        .form-group label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 14px; }
         .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 14px; }
         textarea { resize: vertical; min-height: 100px; }
         .row { display: flex; gap: 15px; flex-wrap: wrap; }
         .row .form-group { flex: 1; min-width: 140px; }
         .dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
         .stat-card { background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .stat-card h3 { margin: 0; font-size: 14px; color: #666; }
-        .stat-card p { margin: 10px 0 0; font-size: 24px; font-weight: bold; color: #075e54; }
+        .stat-card h3 { margin: 0; font-size: 13px; color: #666; }
+        .stat-card p { margin: 8px 0 0; font-size: 26px; font-weight: bold; color: #075e54; }
         .progress-container { margin-top: 12px; background: #eee; border-radius: 10px; height: 18px; overflow: hidden; }
         .progress-bar { background: #25D366; height: 100%; width: 0%; transition: 0.5s; }
         .nav { display: flex; gap: 10px; margin-bottom: 20px; }
@@ -44,21 +45,29 @@
         .zap-dot.online  { background: #25D366; }
         .zap-dot.offline { background: #d32f2f; }
         small.hint { display: block; color: #888; font-size: 12px; margin-top: 4px; }
-        /* Level badge */
-        .level-info { background: #e8f5e9; border-radius: 6px; padding: 10px 14px; margin-top: 10px; font-size: 13px; color: #2e7d32; }
+        .level-info { background: #e8f5e9; border-radius: 6px; padding: 10px 14px; margin-top: 10px; font-size: 13px; color: #2e7d32; line-height: 1.6; }
+        /* Listas */
+        .lista-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 6px; background: #fff; font-size: 13px; }
+        .lista-item input[type=checkbox] { flex-shrink: 0; }
+        .lista-item span.name { flex: 1; }
+        .lista-item span.size { color: #999; font-size: 12px; min-width: 45px; text-align: right; }
+        .lista-item button { background: none; border: none; cursor: pointer; color: #d32f2f; font-size: 16px; padding: 0 4px; }
         /* Modals */
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.65); z-index: 1000; align-items: center; justify-content: center; }
         .modal-overlay.active { display: flex; }
-        .modal-box { background: #fff; padding: 30px; border-radius: 12px; max-width: 500px; width: 92%; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        .modal-box { background: #fff; padding: 30px; border-radius: 12px; max-width: 520px; width: 92%; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
         .modal-box h2 { margin-top: 0; }
         .modal-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: #f9f9f9; border-radius: 8px; padding: 14px; margin: 16px 0; text-align: center; }
         .modal-stats span { display: block; font-size: 22px; font-weight: bold; color: #075e54; }
         .modal-stats small { color: #666; font-size: 12px; }
-        /* Preview modal table */
         .preview-table { width: 100%; border-collapse: collapse; margin: 14px 0; }
-        .preview-table td { padding: 7px 10px; border-bottom: 1px solid #eee; font-size: 14px; }
+        .preview-table td { padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 14px; }
         .preview-table td:first-child { font-weight: bold; color: #555; width: 50%; }
-        .preview-table td:last-child { color: #075e54; }
+        .preview-table td:last-child { color: #075e54; font-weight: bold; }
+        .group-tag { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: bold; }
+        .group-a { background: #e3f2fd; color: #1565c0; }
+        .group-b { background: #f3e5f5; color: #6a1b9a; }
+        .group-c { background: #fff3e0; color: #e65100; }
     </style>
 </head>
 <body>
@@ -67,7 +76,7 @@
 <div class="modal-overlay" id="modalInterrupted">
     <div class="modal-box">
         <h2 style="color:#d32f2f;">⚠️ Disparo Interrompido Detectado</h2>
-        <p>O sistema encontrou uma campanha que não foi concluída. O que deseja fazer?</p>
+        <p>O sistema encontrou uma campanha que não foi concluída.</p>
         <div class="modal-stats" id="modalStats">
             <div><span id="modalPending">-</span><small>Pendentes</small></div>
             <div><span id="modalSent">-</span><small>Enviados</small></div>
@@ -75,7 +84,7 @@
         </div>
         <div class="btn-group">
             <button class="btn btn-danger" onclick="suspendCampaign()">🗑️ Suspender</button>
-            <button class="btn" onclick="continueCampaign()">▶️ Continuar</button>
+            <button class="btn"            onclick="continueCampaign()">▶️ Continuar</button>
         </div>
         <p style="color:#999; font-size:12px; margin-bottom:0;">
             <b>Suspender</b> apaga tudo e zera o dashboard.<br>
@@ -108,40 +117,51 @@
         <div class="stat-card"><h3>Pendentes</h3><p id="statPending">0</p></div>
         <div class="stat-card"><h3>Enviados</h3><p id="statSent">0</p></div>
         <div class="stat-card"><h3>Falhas</h3><p id="statFailed" style="color:#d32f2f;">0</p></div>
-        <div class="stat-card"><h3>Status</h3><p id="statStatus">Pronto</p></div>
+        <div class="stat-card"><h3>Status</h3><p id="statStatus" style="font-size:16px;">Pronto</p></div>
     </div>
 
     <div id="cycleProgress" style="display:none;" class="section">
         <p id="progressText" style="margin:0 0 6px; font-weight:bold;">Progresso: 0/0</p>
         <div class="progress-container"><div class="progress-bar" id="progressBar"></div></div>
         <div class="btn-group" style="margin-top:14px;">
-            <button class="btn btn-secondary" onclick="downloadReport('enviados')">✅ Enviados.txt</button>
-            <button class="btn btn-secondary" onclick="downloadReport('invalidos')">🚫 Inválidos.txt</button>
-            <button class="btn btn-danger"    onclick="downloadReport('falhas')">❌ Falhas.txt</button>
+            <button class="btn btn-secondary btn-sm" onclick="downloadReport('enviados')">✅ Enviados.txt</button>
+            <button class="btn btn-secondary btn-sm" onclick="downloadReport('invalidos')">🚫 Inválidos.txt</button>
+            <button class="btn btn-danger    btn-sm" onclick="downloadReport('falhas')">❌ Falhas.txt</button>
         </div>
     </div>
 
-    <!-- 1. Upload -->
+    <!-- 1. Listas -->
     <div class="section">
-        <h2>1. Upload de Listas (Excel)</h2>
-        <form id="uploadForm">
-            <input type="file" id="excelFiles" accept=".xlsx,.xls" multiple required>
-            <div class="btn-group">
-                <button type="submit" class="btn" style="flex:2;">📂 Processar Listas</button>
-                <button type="button" class="btn btn-danger" style="flex:1;" onclick="clearQueue()">🧹 Limpar Fila</button>
-            </div>
-        </form>
-        <div id="uploadResult" class="info-box" style="display:none;"></div>
+        <h2>1. Gerenciador de Listas</h2>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <label class="btn btn-secondary" style="cursor:pointer;width:auto;padding:10px 20px;font-size:14px;">
+                📁 Adicionar Arquivos (.xlsx)
+                <input type="file" id="uploadListaInput" accept=".xlsx,.xls" multiple style="display:none;" onchange="uploadListas(this)">
+            </label>
+            <button class="btn btn-danger" style="width:auto;padding:10px 20px;font-size:14px;" onclick="clearQueue()">🧹 Limpar Fila</button>
+        </div>
+
+        <div id="listaFiles" style="margin-top:14px;"></div>
+
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px;">
+            <button class="btn" style="width:auto;padding:10px 24px;font-size:14px;" id="btnProcessar" onclick="processListas()">⚙️ Processar Selecionadas</button>
+            <span id="listaTotal" style="font-size:14px;color:#555;font-weight:bold;"></span>
+        </div>
+
+        <div id="uploadResult" class="info-box" style="display:none;margin-top:12px;"></div>
     </div>
 
     <!-- 2. Zaps -->
     <div class="section">
         <h2>2. Seleção de Zaps</h2>
-        <div class="grid-checkboxes" id="accountsGrid"></div>
-        <div class="btn-group">
-            <button class="btn btn-gray" onclick="selectAllAccounts()">Selecionar Todos</button>
-            <button class="btn btn-gray" style="background:#aaa;" onclick="clearAllAccounts()">Limpar Seleção</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+            <button class="btn btn-gray btn-sm" onclick="selectZapGroup('all')">Todos</button>
+            <button class="btn btn-sm" style="background:#1565c0;" onclick="selectZapGroup('A')">Grupo A</button>
+            <button class="btn btn-sm" style="background:#6a1b9a;" onclick="selectZapGroup('B')">Grupo B</button>
+            <button class="btn btn-sm" style="background:#e65100;" onclick="selectZapGroup('C')">Grupo C</button>
+            <button class="btn btn-gray btn-sm" style="background:#aaa;" onclick="selectZapGroup('none')">Limpar</button>
         </div>
+        <div class="grid-checkboxes" id="accountsGrid"></div>
     </div>
 
     <!-- 3. Configuração -->
@@ -149,39 +169,47 @@
         <h2>3. Configuração de Disparo</h2>
 
         <div class="row">
-            <div class="form-group">
-                <label>⏰ Início da janela</label>
-                <input type="time" id="startTime" value="08:00" step="900">
-            </div>
-            <div class="form-group">
-                <label>⏰ Fim da janela</label>
-                <input type="time" id="endTime" value="20:00" step="900">
+            <div class="form-group" style="flex:2;">
+                <label>📅 Fim da campanha</label>
+                <input type="datetime-local" id="endDatetime" onchange="updatePreviewInfo()">
+                <small class="hint">Data e hora limite para encerrar os disparos.</small>
             </div>
         </div>
-        <small class="hint">Disparos ocorrem apenas dentro dessa janela de horário. Deixe vazio para sem restrição.</small>
+
+        <div class="row" style="margin-top:5px;">
+            <div class="form-group">
+                <label>⏰ Início da janela diária</label>
+                <input type="time" id="windowStart" value="08:00" step="900" onchange="updatePreviewInfo()">
+            </div>
+            <div class="form-group">
+                <label>⏰ Fim da janela diária</label>
+                <input type="time" id="windowEnd" value="19:45" step="900" onchange="updatePreviewInfo()">
+            </div>
+        </div>
+        <small class="hint">Disparos ocorrem somente dentro dessa janela, todos os dias. A rotação A→B→C divide a janela em 3 blocos iguais.</small>
 
         <div class="row" style="margin-top:15px;">
             <div class="form-group">
                 <label>⚡ Nível de Disparo</label>
-                <select id="dispatchLevel" onchange="updateLevelInfo()">
-                    <option value="1">Nível 1 — Lento (3 msgs/zap/onda, 90-150s)</option>
-                    <option value="2" selected>Nível 2 — Médio (5 msgs/zap/onda, 60-90s)</option>
-                    <option value="3">Nível 3 — Rápido (8 msgs/zap/onda, 45-70s)</option>
+                <select id="dispatchLevel" onchange="updatePreviewInfo()">
+                    <option value="1">Nível 1 — Lento (3 msgs/zap/onda · 90-150s)</option>
+                    <option value="2" selected>Nível 2 — Médio (5 msgs/zap/onda · 60-90s)</option>
+                    <option value="3">Nível 3 — Rápido (8 msgs/zap/onda · 45-70s)</option>
                 </select>
             </div>
             <div class="form-group">
                 <label>🔥 Nível de Aquecimento</label>
                 <select id="warmupLevel">
-                    <option value="1">Nível 1 — Muito lento (3-5 min)</option>
-                    <option value="2">Nível 2 — Lento (2-3 min)</option>
-                    <option value="3">Nível 3 — Moderado (90-120s)</option>
-                    <option value="4">Nível 4 — Moderado+ (1-1.5 min)</option>
-                    <option value="5" selected>Nível 5 — Padrão (45-60s)</option>
-                    <option value="6">Nível 6 — Ativo (30-45s + áudio)</option>
-                    <option value="7">Nível 7 — Intenso (20-30s + mídia)</option>
-                    <option value="8">Nível 8 — Muito intenso (15-20s)</option>
-                    <option value="9">Nível 9 — Alto (10-15s)</option>
-                    <option value="10">Nível 10 — Máximo (8-12s)</option>
+                    <option value="1">Nível 1 — Muito lento (sem mídia)</option>
+                    <option value="2">Nível 2 — Lento (sem mídia)</option>
+                    <option value="3">Nível 3 — Leve (5% imagens)</option>
+                    <option value="4">Nível 4 — Moderado (10% imagens)</option>
+                    <option value="5" selected>Nível 5 — Normal (20% imagens)</option>
+                    <option value="6">Nível 6 — Ativo (25% img + áudio)</option>
+                    <option value="7">Nível 7 — Intenso (30% img + áudio)</option>
+                    <option value="8">Nível 8 — Agressivo</option>
+                    <option value="9">Nível 9 — Muito agressivo</option>
+                    <option value="10">Nível 10 — Máximo</option>
                 </select>
             </div>
         </div>
@@ -208,10 +236,10 @@
         </div>
     </div>
 
-    <!-- Botões principais -->
+    <!-- Ações -->
     <div class="btn-group">
-        <button class="btn" id="btnStart" style="font-size:17px; padding:15px;" onclick="previewCampaign()">📋 Visualizar Plano</button>
-        <button class="btn btn-danger" id="btnStop" style="font-size:17px; padding:15px; display:none;" onclick="stopCampaign()">🛑 PARAR CAMPANHA</button>
+        <button class="btn"            id="btnStart" style="font-size:17px;padding:15px;" onclick="previewCampaign()">📋 Visualizar Plano</button>
+        <button class="btn btn-danger" id="btnStop"  style="font-size:17px;padding:15px;display:none;" onclick="stopCampaign()">🛑 PARAR CAMPANHA</button>
     </div>
 
     <!-- Teste de envio -->
@@ -226,51 +254,200 @@
                 <label>Número destino (com DDI):</label>
                 <input type="text" id="testPhone" placeholder="5511999999999">
             </div>
-            <div style="flex:1; margin-top:15px;">
+            <div style="flex:1;margin-top:15px;">
                 <button class="btn btn-secondary" id="btnTestSend" onclick="sendTest()">📤 Enviar Teste</button>
             </div>
         </div>
-        <div id="testResult" class="info-box" style="display:none; margin-top:15px;"></div>
+        <div id="testResult" class="info-box" style="display:none;margin-top:15px;"></div>
     </div>
 </div>
 
 <script>
-    // ── Dados de configuração de níveis ──────────────────────────────────────
-    const DISPATCH_LEVELS = {
-        1: { batchPerZap: 3, minDelayS: 90,  maxDelayS: 150, label: '3 msgs/zap/onda · delay 90-150s' },
-        2: { batchPerZap: 5, minDelayS: 60,  maxDelayS:  90, label: '5 msgs/zap/onda · delay 60-90s'  },
-        3: { batchPerZap: 8, minDelayS: 45,  maxDelayS:  70, label: '8 msgs/zap/onda · delay 45-70s'  },
+    // ── Constantes ───────────────────────────────────────────────────────────
+    const DISPATCH_LEVELS_CFG = {
+        1: { batchPerZap: 3, minDelayS: 90,  maxDelayS: 150 },
+        2: { batchPerZap: 5, minDelayS: 60,  maxDelayS:  90 },
+        3: { batchPerZap: 8, minDelayS: 45,  maxDelayS:  70 },
     };
 
-    let currentCycleId   = null;
-    let pendingFormData  = null; // salvo entre previewCampaign e confirmStart
+    let currentCycleId  = null;
+    let pendingFormData = null;
 
-    // ── Build UI ──────────────────────────────────────────────────────────────
+    // ── Grid de Zaps (48) ────────────────────────────────────────────────────
     const accountsGrid = document.getElementById('accountsGrid');
     const testSelect   = document.getElementById('testAccountId');
-    for (let i = 1; i <= 24; i++) {
-        const id  = `WA-${String(i).padStart(2, '0')}`;
+
+    function getZapGroup(i) {
+        const pos = (i - 1) % 12;
+        if (pos < 4) return 'A';
+        if (pos < 8) return 'B';
+        return 'C';
+    }
+
+    for (let i = 1; i <= 48; i++) {
+        const id    = `WA-${String(i).padStart(2, '0')}`;
+        const group = getZapGroup(i);
         accountsGrid.innerHTML += `
             <label>
-                <input type="checkbox" class="zap-cb" value="${id}">
+                <input type="checkbox" class="zap-cb" value="${id}" data-group="${group}">
                 <span>${id}</span>
                 <span class="zap-dot offline" id="dot-${id}"></span>
+                <span class="group-tag group-${group.toLowerCase()}">${group}</span>
             </label>`;
         testSelect.innerHTML += `<option value="${id}">${id}</option>`;
     }
 
-    // ── Level info box ────────────────────────────────────────────────────────
-    function updateLevelInfo() {
-        const level   = parseInt(document.getElementById('dispatchLevel').value);
-        const cfg     = DISPATCH_LEVELS[level];
-        const zaps    = document.querySelectorAll('.zap-cb:checked').length || '?';
-        const msgsWave = typeof zaps === 'number' ? cfg.batchPerZap * zaps : `${cfg.batchPerZap} × zaps`;
-        document.getElementById('levelInfo').innerHTML =
-            `<b>Nível ${level}:</b> ${cfg.label} · Onda de <b>~${msgsWave}</b> mensagens · Stagger ${cfg.minDelayS}s entre sub-grupos · Aquecimento 10 min entre ondas`;
+    function selectZapGroup(filter) {
+        document.querySelectorAll('.zap-cb').forEach(cb => {
+            if      (filter === 'all')  cb.checked = true;
+            else if (filter === 'none') cb.checked = false;
+            else                        cb.checked = (cb.dataset.group === filter);
+        });
+        updatePreviewInfo();
     }
-    document.getElementById('dispatchLevel').addEventListener('change', updateLevelInfo);
-    document.querySelectorAll('.zap-cb').forEach(cb => cb.addEventListener('change', updateLevelInfo));
-    updateLevelInfo();
+
+    // ── Gerenciador de Listas ────────────────────────────────────────────────
+    async function loadListas() {
+        const res   = await fetch('/api/listas').catch(() => ({ json: () => [] }));
+        const files = await res.json();
+        const el    = document.getElementById('listaFiles');
+
+        if (!files.length) {
+            el.innerHTML = '<p style="color:#999;font-size:13px;margin:0;">Nenhuma lista carregada. Adicione arquivos .xlsx acima.</p>';
+            return;
+        }
+
+        el.innerHTML = files.map(f => `
+            <div class="lista-item">
+                <input type="checkbox" class="lista-cb" value="${f.name}" checked>
+                <span class="name">📄 ${f.name}</span>
+                <span class="size">${(f.size / 1024).toFixed(0)} KB</span>
+                <button onclick="deleteLista('${f.name}')" title="Remover">🗑️</button>
+            </div>`).join('');
+    }
+
+    async function uploadListas(input) {
+        if (!input.files.length) return;
+        const fd = new FormData();
+        Array.from(input.files).forEach(f => fd.append('files', f));
+        input.value = '';
+        const btn = document.getElementById('btnProcessar');
+        btn.disabled = true;
+        btn.textContent = '⏳ Enviando...';
+        await fetch('/api/listas/upload', { method: 'POST', body: fd });
+        await loadListas();
+        btn.disabled = false;
+        btn.textContent = '⚙️ Processar Selecionadas';
+    }
+
+    async function deleteLista(filename) {
+        if (!confirm(`Remover "${filename}"?`)) return;
+        await fetch(`/api/listas/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        await loadListas();
+    }
+
+    async function processListas() {
+        const selected = Array.from(document.querySelectorAll('.lista-cb:checked')).map(cb => cb.value);
+        if (!selected.length) return alert('Selecione pelo menos uma lista.');
+
+        const btn = document.getElementById('btnProcessar');
+        btn.disabled    = true;
+        btn.textContent = '⏳ Processando...';
+
+        try {
+            const res  = await fetch('/api/listas/process', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ filenames: selected }),
+            });
+            const data = await res.json();
+            const box  = document.getElementById('uploadResult');
+            box.style.display    = 'block';
+            box.style.borderColor = data.error ? '#d32f2f' : '#25D366';
+            if (data.error) {
+                box.innerHTML = `❌ ${data.error}`;
+            } else {
+                const dupes = data.totalRecebidos - data.totalUnicos;
+                box.innerHTML = `✅ <strong>${data.totalUnicos}</strong> contatos únicos importados · ${data.totalRecebidos} recebidos · ${dupes} duplicados removidos.`;
+                document.getElementById('listaTotal').textContent = `${data.totalUnicos} contatos na fila`;
+            }
+            await updateDashboard();
+            updatePreviewInfo();
+        } catch (_) {
+            alert('Erro ao processar listas.');
+        } finally {
+            btn.disabled    = false;
+            btn.textContent = '⚙️ Processar Selecionadas';
+        }
+    }
+
+    async function clearQueue() {
+        if (!confirm('⚠️ Remover TODOS os contatos pendentes da fila?')) return;
+        await fetch('/api/clear-queue', { method: 'POST' });
+        document.getElementById('listaTotal').textContent = '';
+        updateDashboard();
+    }
+
+    // ── Cálculo de horas disponíveis ─────────────────────────────────────────
+    function parseHHMM(hhmm) {
+        const [h, m] = hhmm.split(':').map(Number);
+        return h * 60 + m;
+    }
+
+    function calcAvailableHours(endDatetimeStr, windowStart, windowEnd) {
+        const now    = new Date();
+        const end    = new Date(endDatetimeStr);
+        const wsMin  = parseHHMM(windowStart);
+        const weMin  = parseHHMM(windowEnd);
+        let totalMin = 0;
+        const cursor = new Date(now);
+
+        while (cursor < end) {
+            const dayStart = new Date(cursor);
+            dayStart.setHours(Math.floor(wsMin / 60), wsMin % 60, 0, 0);
+            const dayEnd = new Date(cursor);
+            dayEnd.setHours(Math.floor(weMin / 60), weMin % 60, 0, 0);
+
+            const effStart = cursor < dayStart ? dayStart : new Date(cursor);
+            const effEnd   = end < dayEnd ? new Date(end) : dayEnd;
+
+            if (effStart < effEnd) totalMin += (effEnd - effStart) / 60000;
+
+            cursor.setDate(cursor.getDate() + 1);
+            cursor.setHours(Math.floor(wsMin / 60), wsMin % 60, 0, 0);
+        }
+        return Math.round(totalMin / 60 * 10) / 10;
+    }
+
+    // ── Atualiza info de preview / level ─────────────────────────────────────
+    function updatePreviewInfo() {
+        const level       = parseInt(document.getElementById('dispatchLevel').value);
+        const cfg         = DISPATCH_LEVELS_CFG[level];
+        const numZaps     = document.querySelectorAll('.zap-cb:checked').length;
+        const pending     = parseInt(document.getElementById('statPending').textContent) || 0;
+        const endStr      = document.getElementById('endDatetime').value;
+        const windowStart = document.getElementById('windowStart').value;
+        const windowEnd   = document.getElementById('windowEnd').value;
+
+        const blockMin    = Math.round((parseHHMM(windowEnd) - parseHHMM(windowStart)) / 3);
+        const msgsWave    = numZaps ? cfg.batchPerZap * numZaps : '?';
+
+        let info = `<b>Nível ${level}:</b> ${cfg.batchPerZap} msgs/zap/onda · delay ${cfg.minDelayS}–${cfg.maxDelayS}s · ${msgsWave} msgs/onda`;
+        info    += ` · Bloco por grupo: <b>${blockMin} min</b> · Rotação A→B→C com IP novo entre blocos`;
+
+        if (endStr && numZaps && pending) {
+            const totalHours = calcAvailableHours(endStr, windowStart, windowEnd);
+            const msgsPerZap = Math.ceil(pending / numZaps);
+            const numDays    = Math.ceil(totalHours / (parseHHMM(windowEnd) - parseHHMM(windowStart)) * 60);
+            const msgsPerDay = numDays > 0 ? Math.ceil(msgsPerZap / Math.max(1, numDays)) : msgsPerZap;
+            info += `<br>📊 <b>${pending}</b> contatos · <b>${numZaps}</b> zaps · <b>~${msgsPerZap}</b> msgs/zap · <b>~${msgsPerDay}</b>/dia · <b>${totalHours}h</b> disponíveis`;
+        }
+
+        document.getElementById('levelInfo').innerHTML = info;
+    }
+
+    document.getElementById('dispatchLevel').addEventListener('change', updatePreviewInfo);
+    document.querySelectorAll('.zap-cb').forEach(cb => cb.addEventListener('change', updatePreviewInfo));
 
     // ── Zap status ────────────────────────────────────────────────────────────
     async function refreshZapStatus() {
@@ -280,51 +457,49 @@
                 const dot = document.getElementById(`dot-${zap.accountId}`);
                 if (dot) dot.className = 'zap-dot ' + (zap.connected ? 'online' : 'offline');
             });
-            updateLevelInfo();
+            updatePreviewInfo();
         } catch (_) {}
     }
-
-    function selectAllAccounts() { document.querySelectorAll('.zap-cb').forEach(cb => cb.checked = true); updateLevelInfo(); }
-    function clearAllAccounts()  { document.querySelectorAll('.zap-cb').forEach(cb => cb.checked = false); updateLevelInfo(); }
 
     // ── Dashboard ─────────────────────────────────────────────────────────────
     async function updateDashboard() {
         try {
             const data = await (await fetch('/api/dashboard-stats')).json();
-            document.getElementById('statPending').innerText = data.totalPending;
-            document.getElementById('statSent').innerText    = data.totalSent;
-            document.getElementById('statFailed').innerText  = data.totalFailed;
+            document.getElementById('statPending').textContent = data.totalPending;
+            document.getElementById('statSent').textContent    = data.totalSent;
+            document.getElementById('statFailed').textContent  = data.totalFailed;
 
             if (data.lastCycle) {
-                currentCycleId = data.lastCycle.id;
+                currentCycleId  = data.lastCycle.id;
                 const status    = data.lastCycle.status;
                 const processed = data.lastCycle.sent_count + data.lastCycle.fail_count;
                 const total     = data.lastCycle.total_messages;
-                document.getElementById('statStatus').innerText = status.toUpperCase();
+                document.getElementById('statStatus').textContent = status.toUpperCase();
                 document.getElementById('cycleProgress').style.display = 'block';
-                document.getElementById('progressText').innerText = `Progresso: ${processed}/${total}`;
-                document.getElementById('progressBar').style.width = total > 0 ? `${(processed / total) * 100}%` : '0%';
+                document.getElementById('progressText').textContent    = `Progresso: ${processed}/${total}`;
+                document.getElementById('progressBar').style.width     = total > 0 ? `${(processed / total) * 100}%` : '0%';
                 const isActive = status === 'em_andamento';
                 document.getElementById('btnStop').style.display  = isActive ? 'block' : 'none';
                 document.getElementById('btnStart').style.display = isActive ? 'none'  : 'block';
             } else {
-                document.getElementById('statStatus').innerText = 'Pronto';
+                document.getElementById('statStatus').textContent = 'Pronto';
                 document.getElementById('cycleProgress').style.display = 'none';
                 document.getElementById('btnStop').style.display  = 'none';
                 document.getElementById('btnStart').style.display = 'block';
                 currentCycleId = null;
             }
+            updatePreviewInfo();
         } catch (_) {}
     }
 
-    // ── Interrupted modal ─────────────────────────────────────────────────────
+    // ── Modal Interrompido ────────────────────────────────────────────────────
     async function checkInterrupted() {
         try {
             const data = await (await fetch('/api/check-interrupted')).json();
             if (data.interrupted) {
-                document.getElementById('modalPending').innerText = data.interrupted.pending;
-                document.getElementById('modalSent').innerText    = data.interrupted.sent_count;
-                document.getElementById('modalFailed').innerText  = data.interrupted.fail_count;
+                document.getElementById('modalPending').textContent = data.interrupted.pending;
+                document.getElementById('modalSent').textContent    = data.interrupted.sent_count;
+                document.getElementById('modalFailed').textContent  = data.interrupted.fail_count;
                 document.getElementById('modalInterrupted').classList.add('active');
             }
         } catch (_) {}
@@ -340,65 +515,58 @@
         document.getElementById('modalInterrupted').classList.remove('active');
     }
 
-    // ── Upload ────────────────────────────────────────────────────────────────
-    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const formData = new FormData();
-        Array.from(document.getElementById('excelFiles').files).forEach(f => formData.append('excelFiles', f));
-        try {
-            const res  = await fetch('/api/upload-lists', { method: 'POST', body: formData });
-            const data = await res.json();
-            const box  = document.getElementById('uploadResult');
-            box.style.display = 'block';
-            if (data.error) {
-                box.style.borderColor = '#d32f2f';
-                box.innerHTML = `❌ ${data.error}`;
-            } else {
-                box.style.borderColor = '#25D366';
-                box.innerHTML = `✅ <strong>${data.totalUnicos}</strong> contatos únicos importados (${data.totalRecebidos} recebidos).`;
-            }
-            updateDashboard();
-        } catch (_) { alert('Erro ao processar arquivos.'); }
-    });
-
-    async function clearQueue() {
-        if (!confirm('⚠️ Remover TODOS os contatos pendentes da fila?')) return;
-        await fetch('/api/clear-queue', { method: 'POST' });
-        alert('✅ Fila limpa.');
-        updateDashboard();
-    }
-
     // ── Preview modal ─────────────────────────────────────────────────────────
     function previewCampaign() {
         const selectedZaps = Array.from(document.querySelectorAll('.zap-cb:checked')).map(cb => cb.value);
-        if (selectedZaps.length === 0) return alert('⚠️ Selecione pelo menos 1 Zap.');
+        if (!selectedZaps.length) return alert('⚠️ Selecione pelo menos 1 Zap.');
 
-        const level     = parseInt(document.getElementById('dispatchLevel').value);
-        const wLevel    = parseInt(document.getElementById('warmupLevel').value);
-        const cfg       = DISPATCH_LEVELS[level];
-        const startTime = document.getElementById('startTime').value;
-        const endTime   = document.getElementById('endTime').value;
-        const msgsWave  = cfg.batchPerZap * selectedZaps.length;
-        const numGroups = Math.ceil(selectedZaps.length / 4);
-        const waveMinS  = cfg.minDelayS * cfg.batchPerZap + numGroups * cfg.minDelayS;
+        const pending     = parseInt(document.getElementById('statPending').textContent) || 0;
+        if (!pending) return alert('⚠️ Fila vazia. Processe uma lista primeiro.');
+
+        const level       = parseInt(document.getElementById('dispatchLevel').value);
+        const wLevel      = parseInt(document.getElementById('warmupLevel').value);
+        const cfg         = DISPATCH_LEVELS_CFG[level];
+        const endStr      = document.getElementById('endDatetime').value;
+        const windowStart = document.getElementById('windowStart').value;
+        const windowEnd   = document.getElementById('windowEnd').value;
+
+        const totalHours  = endStr ? calcAvailableHours(endStr, windowStart, windowEnd) : '—';
+        const msgsPerZap  = Math.ceil(pending / selectedZaps.length);
+        const blockMin    = Math.round((parseHHMM(windowEnd) - parseHHMM(windowStart)) / 3);
+
+        const groupCounts = { A: 0, B: 0, C: 0 };
+        selectedZaps.forEach(id => {
+            const i     = parseInt(id.replace('WA-', ''));
+            const g     = getZapGroup(i);
+            groupCounts[g]++;
+        });
+        const groupStr = Object.entries(groupCounts)
+            .filter(([, n]) => n > 0)
+            .map(([g, n]) => `${n} no grupo ${g}`)
+            .join(' · ');
+
+        const endFormatted = endStr ? new Date(endStr).toLocaleString('pt-BR') : 'Sem prazo definido';
 
         document.getElementById('previewTable').innerHTML = `
-            <tr><td>Zaps selecionados</td><td>${selectedZaps.length} (${numGroups} sub-grupos de 4)</td></tr>
-            <tr><td>Janela de horário</td><td>${(startTime && endTime) ? `${startTime} – ${endTime}` : 'Sem restrição'}</td></tr>
-            <tr><td>Nível de disparo</td><td>Nível ${level} — ${cfg.label}</td></tr>
+            <tr><td>Zaps selecionados</td><td>${selectedZaps.length} (${groupStr})</td></tr>
+            <tr><td>Contatos na fila</td><td>${pending}</td></tr>
+            <tr><td>Msgs por zap</td><td>~${msgsPerZap}</td></tr>
+            <tr><td>Janela diária</td><td>${windowStart} – ${windowEnd}</td></tr>
+            <tr><td>Bloco por grupo (A/B/C)</td><td>~${blockMin} min</td></tr>
+            <tr><td>Horas disponíveis</td><td>${totalHours}h</td></tr>
+            <tr><td>Fim da campanha</td><td>${endFormatted}</td></tr>
+            <tr><td>Nível de disparo</td><td>Nível ${level} — ${cfg.batchPerZap} msgs/zap/onda</td></tr>
             <tr><td>Nível de aquecimento</td><td>Nível ${wLevel}</td></tr>
-            <tr><td>Msgs por onda</td><td>≈ ${msgsWave}</td></tr>
-            <tr><td>Duração estimada/onda</td><td>≈ ${Math.round(waveMinS / 60)} min (+ 10 min de aquecimento)</td></tr>
-            <tr><td>Rotação de IP</td><td>A cada 3 ondas (escalonada)</td></tr>
+            <tr><td>Rotação de IP</td><td>Entre cada bloco A→B→C (escalonada)</td></tr>
         `;
 
-        // Salva dados para o confirmStart
         const fd = new FormData();
         fd.append('accounts',      JSON.stringify(selectedZaps));
         fd.append('messageText',   document.getElementById('messageText').value);
         fd.append('mediaMode',     document.getElementById('mediaMode').value);
-        fd.append('startTime',     startTime);
-        fd.append('endTime',       endTime);
+        fd.append('endDatetime',   endStr);
+        fd.append('windowStart',   windowStart);
+        fd.append('windowEnd',     windowEnd);
         fd.append('dispatchLevel', level);
         fd.append('warmupLevel',   wLevel);
         const media = document.getElementById('mediaFile').files[0];
@@ -418,8 +586,8 @@
         document.getElementById('modalPreview').classList.remove('active');
 
         const btn = document.getElementById('btnStart');
-        btn.innerHTML = '⏳ Iniciando...';
-        btn.disabled  = true;
+        btn.textContent = '⏳ Iniciando...';
+        btn.disabled    = true;
 
         try {
             const res  = await fetch('/api/start-campaign', { method: 'POST', body: pendingFormData });
@@ -427,13 +595,14 @@
             if (data.error) {
                 alert('❌ ' + data.error);
             } else {
-                alert(`✅ ${data.message}\nContatos: ${data.info.totalContatos} | Zaps: ${data.info.zapsSelecionados}`);
+                const i = data.info;
+                alert(`✅ ${data.message}\n${i.totalContatos} contatos · ${i.zapsSelecionados} zaps · Nível ${i.dispatchLevel}\nJanela: ${i.janela} · Fim: ${i.fim}`);
             }
         } catch (_) {
             alert('Erro ao conectar com o servidor.');
         } finally {
-            btn.innerHTML = '📋 Visualizar Plano';
-            btn.disabled  = false;
+            btn.textContent = '📋 Visualizar Plano';
+            btn.disabled    = false;
             pendingFormData = null;
             updateDashboard();
         }
@@ -446,9 +615,7 @@
     }
 
     // ── Relatórios ────────────────────────────────────────────────────────────
-    function downloadReport(type) {
-        window.location.href = `/api/report/${type}`;
-    }
+    function downloadReport(type) { window.location.href = `/api/report/${type}`; }
 
     // ── Teste de envio ────────────────────────────────────────────────────────
     async function sendTest() {
@@ -456,8 +623,8 @@
         if (!phone) return alert('Informe o número de destino.');
 
         const btn = document.getElementById('btnTestSend');
-        btn.disabled  = true;
-        btn.innerHTML = '⏳ Enviando...';
+        btn.disabled    = true;
+        btn.textContent = '⏳ Enviando...';
 
         const fd = new FormData();
         fd.append('accountId',   document.getElementById('testAccountId').value);
@@ -471,23 +638,36 @@
             const res  = await fetch('/api/test-send', { method: 'POST', body: fd });
             const data = await res.json();
             const box  = document.getElementById('testResult');
-            box.style.display = 'block';
+            box.style.display     = 'block';
             box.style.borderColor = data.error ? '#d32f2f' : '#25D366';
-            box.innerText = data.message || data.error;
+            box.textContent       = data.message || data.error;
         } catch (_) {
             alert('Erro ao enviar teste.');
         } finally {
-            btn.disabled  = false;
-            btn.innerHTML = '📤 Enviar Teste';
+            btn.disabled    = false;
+            btn.textContent = '📤 Enviar Teste';
         }
     }
 
+    // ── Valor inicial de data/hora de fim (amanhã 19:45) ─────────────────────
+    function setDefaultEndDatetime() {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        d.setHours(19, 45, 0, 0);
+        const pad = n => String(n).padStart(2, '0');
+        document.getElementById('endDatetime').value =
+            `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
     // ── Init ──────────────────────────────────────────────────────────────────
+    setDefaultEndDatetime();
+    loadListas();
     checkInterrupted();
     updateDashboard();
     refreshZapStatus();
-    setInterval(updateDashboard,    3_000);
-    setInterval(refreshZapStatus,  10_000);
+    updatePreviewInfo();
+    setInterval(updateDashboard,   3_000);
+    setInterval(refreshZapStatus, 10_000);
 </script>
 </body>
 </html>

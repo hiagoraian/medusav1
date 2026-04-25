@@ -33,6 +33,21 @@ app.use('/uploads',      express.static(path.join(__dirname, 'uploads')));
 app.use('/warmup_media', express.static(path.join(__dirname, 'warmup_media')));
 
 const uploadExcel = multer({ storage: multer.memoryStorage() });
+
+const LISTAS_DIR = path.join(__dirname, 'listas');
+fs.mkdirSync(LISTAS_DIR, { recursive: true });
+
+const uploadLista = multer({
+    storage: multer.diskStorage({
+        destination: (_req, _file, cb) => cb(null, LISTAS_DIR),
+        filename:    (_req, file, cb) => cb(null, file.originalname),
+    }),
+    fileFilter: (_req, file, cb) => {
+        const ok = /\.(xlsx|xls)$/i.test(file.originalname);
+        cb(null, ok);
+    },
+});
+
 const uploadMedia = multer({
     storage: multer.diskStorage({
         destination: (req, file, cb) => {
@@ -175,6 +190,46 @@ app.post('/api/whatsapp/start-bulk', async (req, res) => {
     })();
 });
 
+// ── Gerenciador de listas ─────────────────────────────────────────────────────
+
+app.get('/api/listas', (_req, res) => {
+    try {
+        const files = fs.readdirSync(LISTAS_DIR)
+            .filter(f => /\.(xlsx|xls)$/i.test(f) && !f.startsWith('.'))
+            .map(f => ({ name: f, size: fs.statSync(path.join(LISTAS_DIR, f)).size }));
+        res.json(files);
+    } catch (_) { res.json([]); }
+});
+
+app.post('/api/listas/upload', uploadLista.array('files'), (req, res) => {
+    if (!req.files?.length) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+    res.json({ message: `${req.files.length} arquivo(s) adicionado(s).`, files: req.files.map(f => f.originalname) });
+});
+
+app.delete('/api/listas/:filename', (req, res) => {
+    const filename = path.basename(req.params.filename);
+    const filepath = path.join(LISTAS_DIR, filename);
+    try {
+        if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+        res.json({ message: `${filename} removido.` });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/listas/process', async (req, res) => {
+    const { filenames } = req.body;
+    if (!filenames?.length) return res.status(400).json({ error: 'Nenhum arquivo selecionado.' });
+    try {
+        const fakeFiles = filenames.map(name => ({
+            originalname: name,
+            buffer:       fs.readFileSync(path.join(LISTAS_DIR, path.basename(name))),
+        }));
+        const result = processExcelFiles(fakeFiles);
+        if (result.totalUnicos === 0) return res.status(400).json({ error: 'Nenhum número válido encontrado.' });
+        await addContactsToQueue(result.numeros);
+        res.json({ message: 'Listas processadas!', totalRecebidos: result.totalRecebidos, totalUnicos: result.totalUnicos });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Fila e campanha ───────────────────────────────────────────────────────────
 
 app.post('/api/upload-lists', uploadExcel.array('excelFiles'), async (req, res) => {
@@ -235,8 +290,11 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
     try {
         const {
             accounts, messageText, mediaMode,
-            startTime, endTime,
-            dispatchLevel = '2', warmupLevel = '5',
+            endDatetime,
+            windowStart   = '08:00',
+            windowEnd     = '19:45',
+            dispatchLevel = '2',
+            warmupLevel   = '5',
         } = req.body;
 
         const activeAccountsList = JSON.parse(accounts);
@@ -245,7 +303,7 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
 
         const totalPending = await countPending();
         if (totalPending === 0)
-            return res.status(400).json({ error: 'Fila vazia. Faça upload de uma lista primeiro.' });
+            return res.status(400).json({ error: 'Fila vazia. Processe uma lista primeiro.' });
 
         const cycleId = await createCycle(totalPending);
 
@@ -257,21 +315,23 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
             message: '🚀 Campanha iniciada!',
             cycleId,
             info: {
-                totalContatos:   totalPending,
+                totalContatos:    totalPending,
                 zapsSelecionados: activeAccountsList.length,
-                dispatchLevel:   parseInt(dispatchLevel),
-                warmupLevel:     parseInt(warmupLevel),
-                janela:          (startTime && endTime) ? `${startTime}–${endTime}` : 'sem restrição',
+                dispatchLevel:    parseInt(dispatchLevel),
+                warmupLevel:      parseInt(warmupLevel),
+                janela:           `${windowStart}–${windowEnd}`,
+                fim:              endDatetime || 'sem limite',
             },
         });
 
         const campaignConfig = {
-            messageTemplate: messageText || '',
+            messageTemplate: messageText  || '',
             mediaUrl,
             mediaType,
-            mediaMode:     mediaMode     || 'caption',
-            startTime:     startTime     || null,
-            endTime:       endTime       || null,
+            mediaMode:     mediaMode      || 'caption',
+            endDatetime:   endDatetime    || null,
+            windowStart,
+            windowEnd,
             dispatchLevel: parseInt(dispatchLevel),
             warmupLevel:   parseInt(warmupLevel),
         };
