@@ -13,6 +13,21 @@ textAquecimento.txt
 # Relatórios de disparo (cada máquina gera os seus)
 reports/
 
+# Mídia de aquecimento (cada máquina tem as suas, só a estrutura vai pro git)
+warmup_media/imagens/*
+warmup_media/audios/*
+!warmup_media/imagens/.gitkeep
+!warmup_media/audios/.gitkeep
+
+# Resquícios da v1
+.wwebjs_cache/
+.wwebjs_auth/
+orquestrador.sqlite
+temp_media/
+
+# Claude Code
+.claude/
+
 # Sistema operacional
 .DS_Store
 Thumbs.db

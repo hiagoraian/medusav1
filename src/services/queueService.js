@@ -85,6 +85,19 @@ export const getInterruptedCycle = async () => {
     return rows[0] || null;
 };
 
+/**
+ * Pré-atribui um cycleId a um lote de mensagens antes de publicar no RabbitMQ.
+ * Necessário para que countPendingInCycle funcione corretamente durante a onda.
+ */
+export const assignMessagesToCycle = async (messageIds, cycleId) => {
+    if (messageIds.length === 0) return;
+    const placeholders = messageIds.map((_, i) => `$${i + 2}`).join(', ');
+    await query(
+        `UPDATE messages_queue SET cycle_id = $1 WHERE id IN (${placeholders})`,
+        [cycleId, ...messageIds]
+    );
+};
+
 export const resetCampaign = async (cycleId) => {
     if (cycleId) {
         await query(
@@ -97,6 +110,6 @@ export const resetCampaign = async (cycleId) => {
 
 export default {
     addContactsToQueue, clearQueue, getPendingMessages, updateMessageStatus,
-    countPending, countPendingInCycle, createCycle, updateCycleStats,
-    getDashboardStats, getInterruptedCycle, resetCampaign,
+    countPending, countPendingInCycle, assignMessagesToCycle,
+    createCycle, updateCycleStats, getDashboardStats, getInterruptedCycle, resetCampaign,
 };

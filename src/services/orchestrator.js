@@ -1,134 +1,187 @@
-import { getPendingMessages, countPending, countPendingInCycle, updateCycleStats } from './queueService.js';
-import { publishBulk, purgeQueues } from '../queue/producer.js';
+import {
+    getPendingMessages, countPending, countPendingInCycle,
+    assignMessagesToCycle, updateCycleStats,
+} from './queueService.js';
+import { publishBulk, purgeQueues }                      from '../queue/producer.js';
 import { startWorkers, stopWorkers, requestWorkerStop, resetWorkerStop } from '../queue/worker.js';
-import { rotateMobileIPs } from './networkController.js';
-import { generateCycleReport, generateFailureList } from './reportGenerator.js';
+import { rotateMobileIPsStaggered }                      from './networkController.js';
+import { runWarmupFor }                                  from './chipWarmup.js';
+import { generateCampaignReport }                        from './reportGenerator.js';
 
-const CYCLE_DURATION_MS = 45 * 60 * 1000;
+// ── Configuração de nível de disparo ─────────────────────────────────────────
+// batchPerZap : mensagens por zap por onda
+// minDelayS / maxDelayS : delay entre mensagens (segundos)
+const DISPATCH_LEVELS = {
+    1: { batchPerZap: 3, minDelayS: 90, maxDelayS: 150 },
+    2: { batchPerZap: 5, minDelayS: 60, maxDelayS:  90 },
+    3: { batchPerZap: 8, minDelayS: 45, maxDelayS:  70 },
+};
+
+const SUBGROUP_SIZE   = 4;   // zaps por sub-grupo de onda
+const WARMUP_PAUSE_S  = 600; // segundos de aquecimento entre ondas (10 min)
+const IP_ROTATE_EVERY = 3;   // rotacionar IPs a cada N ondas
+
+// ── Estado global ─────────────────────────────────────────────────────────────
 
 let stopRequested = false;
 export const requestStop     = () => { stopRequested = true; requestWorkerStop(); };
 export const resetStop       = () => { stopRequested = false; resetWorkerStop(); };
 export const isStopRequested = () => stopRequested;
 
-const calcDelayPerMsg = (msgsPerCycle, numZaps) => {
-    if (!msgsPerCycle || msgsPerCycle <= 0 || !numZaps) return { min: 45, max: 90 };
-    const msgsPerZap = Math.ceil(msgsPerCycle / numZaps);
-    const baseDelayS = (CYCLE_DURATION_MS / 1000) / Math.max(msgsPerZap, 1);
-    return {
-        min: Math.max(8,  Math.floor(baseDelayS * 0.80)),
-        max: Math.ceil(baseDelayS * 1.20),
-    };
+// ── Janela de horário ─────────────────────────────────────────────────────────
+
+const timeToMinutes = (hhmm) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
 };
 
-const isWithinSelectedTime = (selectedTimes) => {
-    if (!selectedTimes || selectedTimes.length === 0) return true;
-    const now = new Date();
-    return selectedTimes.some(time => {
-        const [h, m] = time.split(':').map(Number);
-        const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
-        const diff   = now - target;
-        return diff >= 0 && diff <= 5 * 60 * 1000;
-    });
-};
-
-const waitForNextScheduledTime = async (selectedTimes) => {
-    if (!selectedTimes || selectedTimes.length === 0) return;
+const isWithinWindow = (startTime, endTime) => {
+    if (!startTime || !endTime) return true;
     const now    = new Date();
-    let minDiff  = Infinity;
-    let nextTime = null;
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    return nowMin >= timeToMinutes(startTime) && nowMin < timeToMinutes(endTime);
+};
 
-    selectedTimes.forEach(time => {
-        const [h, m] = time.split(':').map(Number);
-        const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0);
+const waitUntilWindowOpens = async (startTime, endTime) => {
+    while (!stopRequested) {
+        if (isWithinWindow(startTime, endTime)) return;
+        const now = new Date();
+        const [sh, sm] = startTime.split(':').map(Number);
+        const target   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), sh, sm, 0);
         if (target <= now) target.setDate(target.getDate() + 1);
-        const diff = target - now;
-        if (diff < minDiff) { minDiff = diff; nextTime = target; }
-    });
-
-    if (nextTime) {
-        console.log(`⏰ [ORQUESTRADOR] Próximo disparo em ${Math.ceil(minDiff / 60000)} min (${nextTime.toLocaleTimeString('pt-BR')})`);
-        await new Promise(r => setTimeout(r, minDiff));
+        const diffMs  = target - now;
+        const diffMin = Math.ceil(diffMs / 60000);
+        console.log(`⏰ [ORQUESTRADOR] Fora do horário. Próximo disparo em ${diffMin} min.`);
+        // Dorme em fatias de 5 min para checar stopRequested
+        await new Promise(r => setTimeout(r, Math.min(300_000, diffMs)));
     }
 };
 
-const waitForWorkersToFinish = async (cycleId) => {
+// ── Offsets de sub-grupo (onda) ───────────────────────────────────────────────
+
+/**
+ * Distribui os accountIds em sub-grupos de SUBGROUP_SIZE e atribui a cada um
+ * um offset em ms = índice_do_subgrupo × staggerMs.
+ */
+const buildSubGroupOffsets = (accounts, staggerMs) => {
+    const offsets = {};
+    for (let i = 0; i < accounts.length; i++) {
+        const subGroupIdx   = Math.floor(i / SUBGROUP_SIZE);
+        offsets[accounts[i]] = subGroupIdx * staggerMs;
+    }
+    return offsets;
+};
+
+// ── Espera pela conclusão da onda ─────────────────────────────────────────────
+
+const waitForWaveToFinish = async (cycleId) => {
     while (!stopRequested) {
         const pending = await countPendingInCycle(cycleId);
         if (pending === 0) break;
-        await new Promise(r => setTimeout(r, 5000));
+        await new Promise(r => setTimeout(r, 5_000));
     }
 };
 
-export const runCycle = async (activeAccountsList, campaignConfig, cycleId, selectedTimes = null) => {
-    if (selectedTimes?.length > 0 && !isWithinSelectedTime(selectedTimes)) {
-        console.log(`⏸️ [ORQUESTRADOR] Fora do horário. Aguardando...`);
-        await waitForNextScheduledTime(selectedTimes);
-    }
+// ── Loop principal da campanha ────────────────────────────────────────────────
 
-    const { msgsPerCycle } = campaignConfig;
-    const numZaps    = activeAccountsList.length;
-    const totalBatch = msgsPerCycle || numZaps * 16;
-    const pendings   = await getPendingMessages(totalBatch);
+/**
+ * campaignConfig campos relevantes:
+ *   messageTemplate, mediaUrl, mediaType, mediaMode  — conteúdo
+ *   startTime, endTime  — "HH:MM" — janela de horário
+ *   dispatchLevel (1–3) — velocidade/volume de disparo
+ *   warmupLevel   (1–10) — intensidade do aquecimento entre ondas
+ */
+export const runCampaignLoop = async (activeAccountsList, campaignConfig, cycleId) => {
+    const { startTime, endTime, dispatchLevel = 2, warmupLevel = 5 } = campaignConfig;
+    const level     = DISPATCH_LEVELS[dispatchLevel] || DISPATCH_LEVELS[2];
+    const numZaps   = activeAccountsList.length;
+    const staggerMs = level.minDelayS * 1_000; // offset entre sub-grupos
 
-    if (pendings.length === 0) {
-        await updateCycleStats(cycleId, 0, 0, 'concluido');
-        console.log('✅ [ORQUESTRADOR] Fila vazia! Campanha finalizada.');
-        return false;
-    }
-
-    const delay = calcDelayPerMsg(pendings.length, numZaps);
-    console.log(`\n🌊 [ORQUESTRADOR] Ciclo: ${pendings.length} msgs | ${numZaps} zap(s) | delay ${delay.min}-${delay.max}s/msg`);
-
-    await publishBulk(pendings, activeAccountsList);
-    await startWorkers(activeAccountsList, { ...campaignConfig, cycleId, ...delay });
-
-    await waitForWorkersToFinish(cycleId);
-    await stopWorkers();
-
-    if (stopRequested) {
-        console.log('\n🛑 [ORQUESTRADOR] Campanha interrompida pelo usuário.');
-        await updateCycleStats(cycleId, 0, 0, 'interrompido');
-        await purgeQueues(activeAccountsList);
-        return false;
-    }
-
-    try {
-        const reportPath  = await generateCycleReport(cycleId);
-        const failurePath = await generateFailureList(cycleId);
-        console.log(`📊 Relatórios:\n   ${reportPath}\n   ${failurePath}`);
-    } catch (e) {
-        console.warn('⚠️ Erro ao gerar relatórios:', e.message);
-    }
-
-    console.log('\n🔄 [ORQUESTRADOR] Rotação de IPs...');
-    await rotateMobileIPs();
-
-    const remaining = await countPending();
-    if (remaining === 0) {
-        await updateCycleStats(cycleId, 0, 0, 'concluido');
-        console.log('🏁 [ORQUESTRADOR] Todos os contatos processados!');
-        return false;
-    }
-
-    return true;
-};
-
-export const runCampaignLoop = async (activeAccountsList, campaignConfig, cycleId, selectedTimes = null) => {
     resetStop();
-    let hasMore = true;
+    let waveCount = 0;
 
-    while (hasMore && !stopRequested) {
-        hasMore = await runCycle(activeAccountsList, campaignConfig, cycleId, selectedTimes);
+    console.log(`\n🚀 [ORQUESTRADOR] Campanha iniciada — ${numZaps} zap(s) | nível ${dispatchLevel} | aquecimento ${warmupLevel}`);
+    if (startTime && endTime) console.log(`   Janela: ${startTime}–${endTime}`);
 
-        if (hasMore && !stopRequested) {
-            const waitMs = (!selectedTimes || selectedTimes.length === 0) ? CYCLE_DURATION_MS : 60000;
-            console.log(`\n⏳ [ORQUESTRADOR] Aguardando próxima janela (${Math.round(waitMs / 60000)} min)...`);
-            await new Promise(r => setTimeout(r, waitMs));
+    while (!stopRequested) {
+        // ── Aguarda janela de horário ─────────────────────────────────────────
+        if (startTime && endTime) {
+            if (!isWithinWindow(startTime, endTime)) {
+                console.log('⏸️  [ORQUESTRADOR] Fora da janela. Aguardando...');
+                await waitUntilWindowOpens(startTime, endTime);
+                if (stopRequested) break;
+            }
+        }
+
+        // ── Busca próximo lote ────────────────────────────────────────────────
+        const totalBatch = level.batchPerZap * numZaps;
+        const pendings   = await getPendingMessages(totalBatch);
+
+        if (pendings.length === 0) {
+            await generateCampaignReport(cycleId).catch(e => console.warn('⚠️  Relatório:', e.message));
+            await updateCycleStats(cycleId, 0, 0, 'concluido');
+            console.log('✅ [ORQUESTRADOR] Fila vazia! Campanha finalizada.');
+            break;
+        }
+
+        // ── Pré-atribui cycleId ao lote (necessário para countPendingInCycle) ─
+        const messageIds = pendings.map(r => r.id);
+        await assignMessagesToCycle(messageIds, cycleId);
+
+        // ── Monta offsets de onda ─────────────────────────────────────────────
+        const subGroupOffsets = buildSubGroupOffsets(activeAccountsList, staggerMs);
+        const numSubGroups    = Math.ceil(numZaps / SUBGROUP_SIZE);
+
+        waveCount++;
+        console.log(`\n🌊 [ORQUESTRADOR] Onda ${waveCount} — ${pendings.length} msgs | ${numZaps} zap(s) | ${numSubGroups} sub-grupo(s) | stagger ${Math.round(staggerMs / 1000)}s`);
+
+        // ── Publica no RabbitMQ e inicia workers ──────────────────────────────
+        await publishBulk(pendings, activeAccountsList);
+        await startWorkers(activeAccountsList, {
+            ...campaignConfig,
+            cycleId,
+            minDelayS: level.minDelayS,
+            maxDelayS: level.maxDelayS,
+            subGroupOffsets,
+        });
+
+        await waitForWaveToFinish(cycleId);
+        await stopWorkers();
+
+        if (stopRequested) {
+            await updateCycleStats(cycleId, 0, 0, 'interrompido');
+            await purgeQueues(activeAccountsList);
+            console.log('\n🛑 [ORQUESTRADOR] Campanha interrompida pelo usuário.');
+            break;
+        }
+
+        // ── Aquecimento entre ondas ───────────────────────────────────────────
+        const remaining = await countPending();
+        if (remaining > 0 && !stopRequested) {
+            console.log(`\n🔥 [ORQUESTRADOR] Aquecimento (${Math.round(WARMUP_PAUSE_S / 60)} min, nível ${warmupLevel})...`);
+            await runWarmupFor(activeAccountsList, warmupLevel, WARMUP_PAUSE_S);
+        }
+
+        // ── Rotação de IPs a cada N ondas ─────────────────────────────────────
+        if (waveCount % IP_ROTATE_EVERY === 0 && !stopRequested) {
+            console.log('\n🔄 [ORQUESTRADOR] Rotação de IPs escalonada...');
+            await rotateMobileIPsStaggered();
+        }
+
+        // ── Verifica fim da janela antes da próxima onda ──────────────────────
+        if (startTime && endTime && !isWithinWindow(startTime, endTime) && !stopRequested) {
+            console.log('⏸️  [ORQUESTRADOR] Fim da janela. Aguardando próximo dia...');
+            await waitUntilWindowOpens(startTime, endTime);
         }
     }
 
+    // Gera relatório final se ainda não foi gerado
+    if (!stopRequested) {
+        await generateCampaignReport(cycleId).catch(e => console.warn('⚠️  Relatório final:', e.message));
+    }
+
     resetStop();
+    console.log('🏁 [ORQUESTRADOR] Loop encerrado.\n');
 };
 
-export default { runCycle, runCampaignLoop, requestStop, resetStop };
+export default { runCampaignLoop, requestStop, resetStop, isStopRequested };

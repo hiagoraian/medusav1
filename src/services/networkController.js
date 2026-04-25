@@ -3,220 +3,196 @@ import util from 'util';
 import os from 'os';
 
 const execPromise = util.promisify(exec);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// Configuração dos dispositivos ZTE por porta (Cada celular em sua porta correta)
-// Reestruturado para 24 números: 
-// ZTE 1: 1-8 (Porta 8080)
-// ZTE 2: 9-16 (Porta 8081)
-// ZTE 3: 17-24 (Porta 8082)
+// Serials lidos do .env — cada máquina tem os seus próprios (nunca commitados)
 const ZTE_CONFIG = {
-    8080: {
-        deviceId: '320436309078',
+    ZTE1: {
+        serial:      process.env.ZTE_1_SERIAL || '320436309078',
+        port:        8080,
         description: 'ZTE 1 (Zaps 1-8)',
-        port: 8080
+        zaps:        Array.from({ length: 8  }, (_, i) => `WA-${String(i + 1).padStart(2, '0')}`),
     },
-    8081: {
-        deviceId: '320436306469',
+    ZTE2: {
+        serial:      process.env.ZTE_2_SERIAL || '320436306469',
+        port:        8081,
         description: 'ZTE 2 (Zaps 9-16)',
-        port: 8081
+        zaps:        Array.from({ length: 8  }, (_, i) => `WA-${String(i + 9).padStart(2, '0')}`),
     },
-    8082: {
-        deviceId: '320436306616',
+    ZTE3: {
+        serial:      process.env.ZTE_3_SERIAL || '320436306616',
+        port:        8082,
         description: 'ZTE 3 (Zaps 17-24)',
-        port: 8082
-    }
+        zaps:        Array.from({ length: 8  }, (_, i) => `WA-${String(i + 17).padStart(2, '0')}`),
+    },
 };
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+// Retorna o ZTE responsável por um accountId, ou null
+export const getZteForAccount = (accountId) => {
+    for (const [id, cfg] of Object.entries(ZTE_CONFIG)) {
+        if (cfg.zaps.includes(accountId)) return id;
+    }
+    return null;
+};
 
-/**
- * Detecta o caminho do ADB baseado no SO
- */
 const getAdbPath = () => {
-    const platform = os.platform();
-    if (platform === 'win32') return 'C:\\adb\\adb.exe';
-    if (platform === 'darwin') return '/usr/local/bin/adb';
+    if (os.platform() === 'win32') return 'C:\\adb\\adb.exe';
+    if (os.platform() === 'darwin') return '/usr/local/bin/adb';
     return '/usr/bin/adb';
 };
 
-/**
- * Verifica se o ADB está disponível
- */
-const checkAdbAvailability = async () => {
+const adb = async (serial, command, timeout = 10000) => {
     try {
-        const adbPath = getAdbPath();
-        await execPromise(`"${adbPath}" --version`);
+        const { stdout } = await execPromise(`"${getAdbPath()}" -s ${serial} ${command}`, { timeout });
+        return { ok: true, out: stdout.trim() };
+    } catch (err) {
+        return { ok: false, out: '', err: err.message };
+    }
+};
+
+export const checkAdbAvailability = async () => {
+    try {
+        await execPromise(`"${getAdbPath()}" --version`);
         return true;
-    } catch (error) {
-        console.warn('⚠️ [REDE] ADB não encontrado no caminho padrão.');
+    } catch (_) {
+        console.warn('⚠️ [ADB] ADB não encontrado.');
         return false;
     }
 };
 
-/**
- * Executa comando ADB com tratamento de erro e timeout
- */
-const executeAdbCommand = async (deviceId, command, timeout = 10000) => {
-    try {
-        const adbPath = getAdbPath();
-        const fullCommand = `"${adbPath}" -s ${deviceId} ${command}`;
-        const { stdout } = await execPromise(fullCommand, { timeout });
-        return { success: true, output: stdout, error: null };
-    } catch (error) {
-        return { success: false, output: null, error: error.message };
-    }
+export const checkDeviceConnection = async (serial) => {
+    const r = await adb(serial, 'shell echo ok');
+    return r.ok && r.out.includes('ok');
 };
 
-/**
- * Verifica se o dispositivo está conectado
- */
-export const checkDeviceConnection = async (deviceId) => {
-    const result = await executeAdbCommand(deviceId, 'shell echo "connected"');
-    return result.success && result.output.includes('connected');
-};
-
-/**
- * Verifica o status de todos os dispositivos
- */
 export const checkAllDevicesStatus = async () => {
-    console.log('\n📱 [REDE] Verificando status de todos os dispositivos...\n');
-    const adbAvailable = await checkAdbAvailability();
-    if (!adbAvailable) return { available: false, devices: [] };
-    
-    const deviceStatus = [];
-    for (const [port, config] of Object.entries(ZTE_CONFIG)) {
-        const isConnected = await checkDeviceConnection(config.deviceId);
-        console.log(`🔌 Porta ${port} - ${config.description}: ${isConnected ? '✅ Conectado' : '❌ Desconectado'}`);
-        deviceStatus.push({ port, deviceId: config.deviceId, connected: isConnected });
+    const available = await checkAdbAvailability();
+    if (!available) return { available: false, devices: [] };
+
+    const devices = [];
+    for (const [id, cfg] of Object.entries(ZTE_CONFIG)) {
+        const connected = await checkDeviceConnection(cfg.serial);
+        console.log(`🔌 ${cfg.description}: ${connected ? '✅' : '❌'}`);
+        devices.push({ port: cfg.port, deviceId: cfg.serial, description: id, connected });
     }
-    return { available: true, devices: deviceStatus };
+    return { available: true, devices };
 };
 
-/**
- * Configura o forward de porta ADB com retries
- */
-export const setupAdbForward = async (port, deviceId, retries = 3) => {
-    const adbPath = getAdbPath();
-    const forwardCmd = `"${adbPath}" -s ${deviceId} forward tcp:${port} tcp:${port}`;
-    
+export const setupAdbForward = async (port, serial, retries = 3) => {
     for (let i = 1; i <= retries; i++) {
-        try {
-            await execPromise(forwardCmd);
-            console.log(`✅ [REDE] Forward configurado: ${deviceId} → porta ${port}`);
+        const r = await adb(serial, `forward tcp:${port} tcp:${port}`);
+        if (r.ok) {
+            console.log(`✅ [ADB] Forward ${serial} → :${port}`);
             return true;
-        } catch (error) {
-            console.warn(`⚠️ [REDE] Tentativa ${i}/${retries} falhou para ${deviceId}: ${error.message}`);
-            if (i < retries) await sleep(2000);
         }
+        console.warn(`⚠️ [ADB] Forward falhou (${i}/${retries}): ${r.err}`);
+        if (i < retries) await sleep(2000);
     }
-    console.error(`❌ [REDE] Falha definitiva ao configurar forward para ${deviceId}`);
     return false;
 };
 
-/**
- * Configura todos os forwards de porta necessários
- */
 export const setupAllAdbForwards = async () => {
-    console.log('\n🔗 [REDE] Configurando forwards de porta ADB...\n');
-    const adbAvailable = await checkAdbAvailability();
-    if (!adbAvailable) return false;
-    
-    let allSuccess = true;
-    for (const [port, config] of Object.entries(ZTE_CONFIG)) {
-        const success = await setupAdbForward(port, config.deviceId);
-        if (!success) allSuccess = false;
+    if (!await checkAdbAvailability()) return false;
+    let ok = true;
+    for (const cfg of Object.values(ZTE_CONFIG)) {
+        if (!await setupAdbForward(cfg.port, cfg.serial)) ok = false;
     }
-    return allSuccess;
+    return ok;
 };
 
 /**
- * Liga o Modo Avião em um dispositivo
- */
-export const enableAirplaneMode = async (deviceId) => {
-    const result = await executeAdbCommand(deviceId, 'shell cmd connectivity airplane-mode enable');
-    if (result.success) {
-        console.log(`✈️ [REDE] Modo Avião LIGADO: ${deviceId}`);
-        return true;
-    }
-    return false;
-};
-
-/**
- * Desliga o Modo Avião em um dispositivo
- */
-export const disableAirplaneMode = async (deviceId) => {
-    const result = await executeAdbCommand(deviceId, 'shell cmd connectivity airplane-mode disable');
-    if (result.success) {
-        console.log(`📶 [REDE] Modo Avião DESLIGADO: ${deviceId}`);
-        return true;
-    }
-    return false;
-};
-
-/**
- * Rotação de IP para um dispositivo específico
- */
-export const rotateDeviceIP = async (deviceId) => {
-    try {
-        console.log(`\n🔄 [REDE] Rotacionando IP do dispositivo: ${deviceId}`);
-        if (!await checkDeviceConnection(deviceId)) {
-            console.warn(`⚠️ [REDE] Dispositivo ${deviceId} desconectado. Pulando rotação.`);
-            return false;
-        }
-        
-        await enableAirplaneMode(deviceId);
-        await sleep(15000);
-        await disableAirplaneMode(deviceId);
-        await sleep(5000);
-        return true;
-    } catch (error) {
-        return false;
-    }
-};
-
-/**
- * Rotação de IPs em lote
- */
-export const rotateMobileIPs = async () => {
-    console.log('\n🔄 INICIANDO ROTAÇÃO DE IPs (Modo Avião)');
-    const adbAvailable = await checkAdbAvailability();
-    if (!adbAvailable) return false;
-    
-    const uniqueDevices = [...new Set(Object.values(ZTE_CONFIG).map(c => c.deviceId))];
-    for (const deviceId of uniqueDevices) {
-        await rotateDeviceIP(deviceId);
-    }
-    return true;
-};
-
-/**
- * Verifica se a conexão móvel (via ADB forward) está ativa.
- * Caso falhe, o sistema deve usar o Wi-Fi do PC.
+ * Verifica se a conexão 4G via proxy está ativa.
+ * Se falhar, o zap deverá usar Wi-Fi (proxy nulo).
  */
 export const isMobileConnectionActive = async (port) => {
     try {
-        // /dev/null não existe no Windows — usa NUL no Windows e /dev/null nos demais.
-        // Bug anterior: no Windows a chamada sempre lançava erro silencioso e retornava
-        // false, fazendo TODOS os zaps ignorarem o proxy e usarem o Wi-Fi do PC.
-        const nullDevice = os.platform() === 'win32' ? 'NUL' : '/dev/null';
+        const nullDev = os.platform() === 'win32' ? 'NUL' : '/dev/null';
         const { stdout } = await execPromise(
-            `curl -s -o ${nullDevice} -w "%{http_code}" --proxy 127.0.0.1:${port} http://www.google.com --connect-timeout 5`,
+            `curl -s -o ${nullDev} -w "%{http_code}" --proxy 127.0.0.1:${port} http://www.google.com --connect-timeout 5`,
             { timeout: 8000 }
         );
         return stdout.trim() === '200';
-    } catch (error) {
+    } catch (_) {
         return false;
     }
 };
 
+/**
+ * Retorna a config de proxy para criar instância na Evolution API.
+ * Se 4G inativo → null (usa Wi-Fi do Docker host).
+ */
+export const getProxyConfigForAccount = async (accountId) => {
+    const zteId = getZteForAccount(accountId);
+    if (!zteId) return null;
+    const cfg = ZTE_CONFIG[zteId];
+    const active = await isMobileConnectionActive(cfg.port);
+    if (active) {
+        console.log(`[NET] ${accountId} → 4G (porta ${cfg.port})`);
+        return { host: 'host.docker.internal', port: cfg.port };
+    }
+    console.warn(`⚠️ [NET] ${accountId} → 4G indisponível na porta ${cfg.port}. Usando Wi-Fi.`);
+    return null;
+};
+
+/**
+ * Ciclo de modo avião em um ZTE: desliga → espera → liga → espera reconexão.
+ * Retorna true se o dispositivo reconectou com novo IP.
+ */
+export const rotateZteIP = async (zteId) => {
+    const cfg = ZTE_CONFIG[zteId];
+    if (!cfg) return false;
+
+    console.log(`\n✈️  [ROTATE] ${cfg.description} — iniciando rotação de IP...`);
+
+    const connected = await checkDeviceConnection(cfg.serial);
+    if (!connected) {
+        console.warn(`⚠️ [ROTATE] ${cfg.description} não responde no ADB. Pulando rotação.`);
+        return false;
+    }
+
+    await adb(cfg.serial, 'shell cmd connectivity airplane-mode enable');
+    console.log(`✈️  [ROTATE] Modo avião ON — ${cfg.description}`);
+    await sleep(30000); // 30s para desconectar completamente
+
+    await adb(cfg.serial, 'shell cmd connectivity airplane-mode disable');
+    console.log(`📶 [ROTATE] Modo avião OFF — ${cfg.description}. Aguardando reconexão...`);
+    await sleep(120000); // 2min para reconectar 4G
+
+    // Verifica se voltou online
+    const ok = await isMobileConnectionActive(cfg.port);
+    console.log(ok
+        ? `✅ [ROTATE] ${cfg.description} reconectado com novo IP.`
+        : `⚠️ [ROTATE] ${cfg.description} não reconectou no 4G. Seguindo com Wi-Fi.`
+    );
+    return ok;
+};
+
+/**
+ * Rotaciona os IPs de todos os ZTEs ativos de forma escalonada (90s entre cada um).
+ * Isso evita que todos fiquem offline ao mesmo tempo.
+ */
+export const rotateMobileIPsStaggered = async (activeZteIds = ['ZTE1', 'ZTE2', 'ZTE3']) => {
+    if (!await checkAdbAvailability()) {
+        console.warn('⚠️ [ROTATE] ADB indisponível. Rotação de IP ignorada.');
+        return;
+    }
+
+    console.log(`\n🔄 [ROTATE] Iniciando rotação escalonada: ${activeZteIds.join(', ')}`);
+    for (let i = 0; i < activeZteIds.length; i++) {
+        if (i > 0) {
+            console.log(`⏳ [ROTATE] Aguardando 90s antes de rotar ${activeZteIds[i]}...`);
+            await sleep(90000);
+        }
+        await rotateZteIP(activeZteIds[i]);
+    }
+    console.log('✅ [ROTATE] Rotação de IPs concluída.\n');
+};
+
+// Compat alias mantido para chamadas legadas no orchestrator
+export const rotateMobileIPs = () => rotateMobileIPsStaggered();
+
 export default {
-    checkDeviceConnection,
-    checkAllDevicesStatus,
-    setupAdbForward,
-    setupAllAdbForwards,
-    rotateMobileIPs,
-    getAdbPath,
-    checkAdbAvailability,
-    isMobileConnectionActive,
-    ZTE_CONFIG
+    ZTE_CONFIG, getZteForAccount, checkAdbAvailability, checkDeviceConnection,
+    checkAllDevicesStatus, setupAllAdbForwards, isMobileConnectionActive,
+    getProxyConfigForAccount, rotateZteIP, rotateMobileIPsStaggered, rotateMobileIPs,
 };

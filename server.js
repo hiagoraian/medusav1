@@ -5,14 +5,17 @@ import multer from 'multer';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-import { initSchema } from './src/database/postgres.js';
-import { processExcelFiles } from './src/services/excelProcessor.js';
-import { addContactsToQueue, countPending, createCycle, getDashboardStats, clearQueue, resetCampaign, getInterruptedCycle } from './src/services/queueService.js';
-import { runCampaignLoop, requestStop } from './src/services/orchestrator.js';
-import { startWarmup, stopWarmup } from './src/services/chipWarmup.js';
-import { checkAllDevicesStatus, setupAllAdbForwards } from './src/services/networkController.js';
-import { generateCycleReport, generateFailureList } from './src/services/reportGenerator.js';
-import * as evolution from './src/evolution/client.js';
+import { initSchema }                              from './src/database/postgres.js';
+import { processExcelFiles }                       from './src/services/excelProcessor.js';
+import {
+    addContactsToQueue, countPending, createCycle,
+    getDashboardStats, clearQueue, resetCampaign, getInterruptedCycle,
+} from './src/services/queueService.js';
+import { runCampaignLoop, requestStop }            from './src/services/orchestrator.js';
+import { startWarmup, stopWarmup }                 from './src/services/chipWarmup.js';
+import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount } from './src/services/networkController.js';
+import { generateCampaignReport }                  from './src/services/reportGenerator.js';
+import * as evolution                              from './src/evolution/client.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -20,13 +23,14 @@ const __dirname  = path.dirname(__filename);
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-// URL base que a Evolution API (container Docker) usa para baixar mídias servidas pelo Node.js
+// URL base que a Evolution API (container Docker) usa para baixar mídias
 const MEDIA_HOST = process.env.MEDIA_HOST || `http://host.docker.internal:${PORT}`;
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads',      express.static(path.join(__dirname, 'uploads')));
+app.use('/warmup_media', express.static(path.join(__dirname, 'warmup_media')));
 
 const uploadExcel = multer({ storage: multer.memoryStorage() });
 const uploadMedia = multer({
@@ -40,9 +44,7 @@ const uploadMedia = multer({
     }),
 });
 
-// ==========================================
-// STARTUP
-// ==========================================
+// ── Startup ───────────────────────────────────────────────────────────────────
 
 (async () => {
     console.log('\n🚀 [STARTUP] Iniciando Medusa Evolution...\n');
@@ -58,36 +60,26 @@ const uploadMedia = multer({
     }
 })();
 
-process.on('uncaughtException',   (err) => console.error('🚨 uncaughtException:', err.message));
-process.on('unhandledRejection',  (err) => console.error('🚨 unhandledRejection:', err?.message || err));
+process.on('uncaughtException',  (err) => console.error('🚨 uncaughtException:', err.message));
+process.on('unhandledRejection', (err) => console.error('🚨 unhandledRejection:', err?.message || err));
 
-// ==========================================
-// ROTAS GERAIS
-// ==========================================
+// ── Geral ─────────────────────────────────────────────────────────────────────
 
 app.get('/api/status', (req, res) => {
     res.json({ status: 'Medusa Evolution Ativo', versao: '2.0', porta: PORT });
 });
 
 app.get('/api/dashboard-stats', async (req, res) => {
-    try {
-        res.json(await getDashboardStats());
-    } catch (err) {
-        res.status(500).json({ error: 'Erro ao obter estatísticas.' });
-    }
+    try { res.json(await getDashboardStats()); }
+    catch (err) { res.status(500).json({ error: 'Erro ao obter estatísticas.' }); }
 });
 
-// ==========================================
-// ZAPS — Evolution API
-// ==========================================
+// ── Zaps — Evolution API ──────────────────────────────────────────────────────
 
-/**
- * Retorna o status de todos os 24 zaps consultando a Evolution API.
- */
 app.get('/api/zaps-status', async (req, res) => {
     try {
-        const instances = await evolution.fetchInstances();
-        const instanceMap = {};
+        const instances    = await evolution.fetchInstances();
+        const instanceMap  = {};
         instances.forEach(inst => {
             const name  = inst.instanceName || inst.name;
             const state = inst.connectionStatus || inst.instance?.state || inst.state || 'close';
@@ -106,22 +98,20 @@ app.get('/api/zaps-status', async (req, res) => {
     }
 });
 
-/**
- * Cria ou reconecta uma instância. Se ainda não conectada, retorna o QR code (base64).
- */
 app.post('/api/whatsapp/start', async (req, res) => {
     const { accountId } = req.body;
     if (!accountId) return res.status(400).json({ error: 'accountId obrigatório.' });
 
     try {
-        await evolution.createInstance(accountId);
-        const state = await evolution.getConnectionState(accountId);
+        // Descobre qual proxy 4G usar (ou null para Wi-Fi)
+        const proxyConfig = await getProxyConfigForAccount(accountId);
+        await evolution.createInstance(accountId, proxyConfig);
 
+        const state = await evolution.getConnectionState(accountId);
         if (state === 'open') {
             return res.json({ connected: true, message: `${accountId} já está conectado.` });
         }
 
-        // Instância criada mas não conectada — retorna QR code para exibir no browser
         const qrcode = await evolution.getQRCode(accountId);
         res.json({ connected: false, qrcode });
     } catch (err) {
@@ -129,10 +119,6 @@ app.post('/api/whatsapp/start', async (req, res) => {
     }
 });
 
-/**
- * Retorna o QR code atual (polling do frontend).
- * Retorna { state, qrcode } onde qrcode é null se já conectado.
- */
 app.get('/api/whatsapp/qrcode/:accountId', async (req, res) => {
     const { accountId } = req.params;
     try {
@@ -144,9 +130,6 @@ app.get('/api/whatsapp/qrcode/:accountId', async (req, res) => {
     }
 });
 
-/**
- * Webhook recebido da Evolution API para atualização de estado/entrega.
- */
 app.post('/webhook/evolution', (req, res) => {
     const event = req.body;
     if (event?.event === 'CONNECTION_UPDATE') {
@@ -156,9 +139,6 @@ app.post('/webhook/evolution', (req, res) => {
     res.sendStatus(200);
 });
 
-/**
- * Desconecta e remove a sessão de um zap (logout na Evolution API).
- */
 app.delete('/api/whatsapp/:accountId', async (req, res) => {
     const { accountId } = req.params;
     if (!accountId || !/^WA-\d{2}$/.test(accountId))
@@ -174,9 +154,6 @@ app.delete('/api/whatsapp/:accountId', async (req, res) => {
     }
 });
 
-/**
- * Inicia múltiplas instâncias com delay escalonado.
- */
 app.post('/api/whatsapp/start-bulk', async (req, res) => {
     const { accounts } = req.body;
     if (!accounts?.length) return res.status(400).json({ error: 'Lista de contas vazia.' });
@@ -186,20 +163,19 @@ app.post('/api/whatsapp/start-bulk', async (req, res) => {
     (async () => {
         for (let i = 0; i < accounts.length; i++) {
             try {
-                await evolution.createInstance(accounts[i]);
+                const proxyConfig = await getProxyConfigForAccount(accounts[i]);
+                await evolution.createInstance(accounts[i], proxyConfig);
                 console.log(`[BULK] ${accounts[i]} (${i + 1}/${accounts.length}) iniciado.`);
             } catch (err) {
                 console.error(`[BULK] Erro em ${accounts[i]}:`, err.message);
             }
-            if (i < accounts.length - 1) await new Promise(r => setTimeout(r, 3000));
+            if (i < accounts.length - 1) await new Promise(r => setTimeout(r, 3_000));
         }
         console.log('[BULK] Reconexão em massa concluída.');
     })();
 });
 
-// ==========================================
-// FILA E CAMPANHA
-// ==========================================
+// ── Fila e campanha ───────────────────────────────────────────────────────────
 
 app.post('/api/upload-lists', uploadExcel.array('excelFiles'), async (req, res) => {
     try {
@@ -207,7 +183,11 @@ app.post('/api/upload-lists', uploadExcel.array('excelFiles'), async (req, res) 
         const result = processExcelFiles(req.files);
         if (result.totalUnicos === 0) return res.status(400).json({ error: 'Nenhum número válido encontrado.' });
         await addContactsToQueue(result.numeros);
-        res.json({ message: 'Listas processadas!', totalRecebidos: result.totalRecebidos, totalUnicos: result.totalUnicos });
+        res.json({
+            message: 'Listas processadas!',
+            totalRecebidos: result.totalRecebidos,
+            totalUnicos:    result.totalUnicos,
+        });
     } catch (err) {
         res.status(500).json({ error: 'Erro ao processar arquivos.' });
     }
@@ -217,22 +197,19 @@ app.post('/api/clear-queue', async (req, res) => {
     try {
         await clearQueue();
         res.json({ message: '✅ Fila limpa com sucesso!' });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/check-interrupted', async (req, res) => {
     try {
         const cycle = await getInterruptedCycle();
         if (!cycle) return res.json({ interrupted: null });
-        const { rows } = await (await import('./src/database/postgres.js')).default.query(
+        const db = (await import('./src/database/postgres.js')).default;
+        const { rows } = await db.query(
             `SELECT COUNT(*) AS pending FROM messages_queue WHERE status = 'pendente'`
         );
         res.json({ interrupted: { ...cycle, pending: parseInt(rows[0].pending, 10) } });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/suspend-campaign', async (req, res) => {
@@ -240,25 +217,39 @@ app.post('/api/suspend-campaign', async (req, res) => {
         const cycle = await getInterruptedCycle();
         await resetCampaign(cycle?.id || null);
         res.json({ message: '🗑️ Campanha suspensa e dados zerados.' });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+/**
+ * POST /api/start-campaign
+ * Body (multipart/form-data):
+ *   accounts       — JSON array de accountIds ativos
+ *   messageText    — template com suporte a spintax
+ *   mediaMode      — "caption" | "separate"
+ *   startTime      — "HH:MM" (opcional)
+ *   endTime        — "HH:MM" (opcional)
+ *   dispatchLevel  — 1 | 2 | 3
+ *   warmupLevel    — 1–10
+ *   mediaFile      — arquivo de mídia (opcional)
+ */
 app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res) => {
     try {
-        const { accounts, messageText, mediaMode, msgsPerCycle, selectedTimes } = req.body;
+        const {
+            accounts, messageText, mediaMode,
+            startTime, endTime,
+            dispatchLevel = '2', warmupLevel = '5',
+        } = req.body;
+
         const activeAccountsList = JSON.parse(accounts);
-        if (activeAccountsList.length === 0) return res.status(400).json({ error: 'Nenhuma conta selecionada.' });
+        if (activeAccountsList.length === 0)
+            return res.status(400).json({ error: 'Nenhuma conta selecionada.' });
 
         const totalPending = await countPending();
-        if (totalPending === 0) return res.status(400).json({ error: 'Fila vazia. Faça upload de uma lista primeiro.' });
+        if (totalPending === 0)
+            return res.status(400).json({ error: 'Fila vazia. Faça upload de uma lista primeiro.' });
 
-        const cycleId         = await createCycle(totalPending);
-        const msgsPerCycleVal = parseInt(msgsPerCycle) || (activeAccountsList.length * 16);
-        const selectedList    = selectedTimes ? JSON.parse(selectedTimes) : null;
+        const cycleId = await createCycle(totalPending);
 
-        // Converte o arquivo local em URL acessível pela Evolution API (Docker)
         const mediaUrl  = req.file ? `${MEDIA_HOST}/uploads/${req.file.filename}` : null;
         const mediaExt  = req.file ? path.extname(req.file.filename).toLowerCase().slice(1) : null;
         const mediaType = ['mp4', 'mov', 'avi', 'mkv'].includes(mediaExt) ? 'video' : 'image';
@@ -266,22 +257,30 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
         res.json({
             message: '🚀 Campanha iniciada!',
             cycleId,
-            info: { totalContatos: totalPending, zapsSelecionados: activeAccountsList.length, msgsPorCiclo: msgsPerCycleVal },
+            info: {
+                totalContatos:   totalPending,
+                zapsSelecionados: activeAccountsList.length,
+                dispatchLevel:   parseInt(dispatchLevel),
+                warmupLevel:     parseInt(warmupLevel),
+                janela:          (startTime && endTime) ? `${startTime}–${endTime}` : 'sem restrição',
+            },
         });
 
         const campaignConfig = {
             messageTemplate: messageText || '',
             mediaUrl,
             mediaType,
-            mediaMode:    mediaMode    || 'caption',
-            msgsPerCycle: msgsPerCycleVal,
+            mediaMode:     mediaMode     || 'caption',
+            startTime:     startTime     || null,
+            endTime:       endTime       || null,
+            dispatchLevel: parseInt(dispatchLevel),
+            warmupLevel:   parseInt(warmupLevel),
         };
 
         (async () => {
             try {
-                await runCampaignLoop(activeAccountsList, campaignConfig, cycleId, selectedList);
+                await runCampaignLoop(activeAccountsList, campaignConfig, cycleId);
             } finally {
-                // Remove mídia temporária após campanha concluída
                 if (req.file) {
                     const filePath = path.join(__dirname, 'uploads', req.file.filename);
                     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -299,9 +298,7 @@ app.post('/api/stop-campaign', (req, res) => {
     res.json({ message: '🛑 Sinal de parada enviado.' });
 });
 
-// ==========================================
-// TESTE DE ENVIO
-// ==========================================
+// ── Teste de envio ────────────────────────────────────────────────────────────
 
 app.post('/api/test-send', uploadMedia.single('mediaFile'), async (req, res) => {
     try {
@@ -312,10 +309,8 @@ app.post('/api/test-send', uploadMedia.single('mediaFile'), async (req, res) => 
         const state = await evolution.getConnectionState(accountId);
         if (state !== 'open') return res.status(400).json({ error: `${accountId} não está conectado.` });
 
-        let result;
         if (!req.file) {
             await evolution.sendText(accountId, normalizedPhone, messageText || '');
-            result = 'enviado';
         } else {
             const mediaUrl  = `${MEDIA_HOST}/uploads/${req.file.filename}`;
             const mediaExt  = path.extname(req.file.filename).toLowerCase().slice(1);
@@ -327,7 +322,7 @@ app.post('/api/test-send', uploadMedia.single('mediaFile'), async (req, res) => 
                 if (messageText) await evolution.sendText(accountId, normalizedPhone, messageText);
                 await evolution.sendMedia(accountId, normalizedPhone, mediaUrl, mediaType, '');
             }
-            result = 'enviado';
+
             const fp = path.join(__dirname, 'uploads', req.file.filename);
             if (fs.existsSync(fp)) fs.unlinkSync(fp);
         }
@@ -338,17 +333,15 @@ app.post('/api/test-send', uploadMedia.single('mediaFile'), async (req, res) => 
     }
 });
 
-// ==========================================
-// AQUECIMENTO
-// ==========================================
+// ── Aquecimento manual ────────────────────────────────────────────────────────
 
 app.post('/api/warmup-chips/start', async (req, res) => {
     try {
-        const { accounts } = req.body;
+        const { accounts, level = 5 } = req.body;
         const list = JSON.parse(accounts);
         if (list.length < 2) return res.status(400).json({ error: 'Mínimo 2 contas.' });
-        res.json({ message: '🔥 Aquecimento iniciado!' });
-        startWarmup(list);
+        res.json({ message: `🔥 Aquecimento nível ${level} iniciado!` });
+        startWarmup(list, parseInt(level));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -359,33 +352,38 @@ app.post('/api/warmup-chips/stop', (req, res) => {
     res.json({ message: '🛑 Aquecimento parado.' });
 });
 
-// ==========================================
-// MANUTENÇÃO
-// ==========================================
+// ── Relatórios ────────────────────────────────────────────────────────────────
+
+// Gera/regenera e faz download dos relatórios da última campanha
+app.get('/api/report/enviados',  (req, res) => serveReport(res, 'enviados.txt'));
+app.get('/api/report/invalidos', (req, res) => serveReport(res, 'invalidos.txt'));
+app.get('/api/report/falhas',    (req, res) => serveReport(res, 'falhas.txt'));
+
+const serveReport = (res, filename) => {
+    const filePath = path.join(__dirname, 'reports', filename);
+    if (!fs.existsSync(filePath))
+        return res.status(404).json({ error: 'Relatório ainda não gerado.' });
+    res.download(filePath);
+};
+
+// Dispara regeneração manual do relatório de um cycle
+app.post('/api/report/generate/:cycleId', async (req, res) => {
+    try {
+        await generateCampaignReport(parseInt(req.params.cycleId));
+        res.json({ message: '✅ Relatórios gerados em reports/' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── Manutenção ────────────────────────────────────────────────────────────────
 
 app.get('/api/devices-status', async (req, res) => {
-    try {
-        res.json(await checkAllDevicesStatus());
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    try { res.json(await checkAllDevicesStatus()); }
+    catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/report/:cycleId', async (req, res) => {
-    try {
-        res.download(await generateCycleReport(req.params.cycleId));
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.get('/api/failure-list/:cycleId', async (req, res) => {
-    try {
-        res.download(await generateFailureList(req.params.cycleId));
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
+// ── Inicialização ─────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
     console.log(`\n🚀 Medusa Evolution rodando em: http://localhost:${PORT}\n`);

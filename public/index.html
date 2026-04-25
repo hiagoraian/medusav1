@@ -3,403 +3,491 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Medusa - Orquestrador de Disparos</title>
+    <title>Medusa — Orquestrador de Disparos</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030;}
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030; }
         .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
         h1 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 0; }
-        h2 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 30px;}
+        h2 { color: #075e54; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; margin-top: 0; }
         .section { margin-bottom: 20px; padding: 20px; background: #f9f9f9; border-radius: 8px; border: 1px solid #ddd; }
-        .btn { background-color: #25D366; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.3s;}
+        .btn { background-color: #25D366; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 5px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.3s; }
         .btn:hover { background-color: #128C7E; }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
         .btn-secondary { background-color: #34b7f1; }
+        .btn-secondary:hover { background-color: #1a9fd9; }
         .btn-danger { background-color: #d32f2f; }
+        .btn-danger:hover { background-color: #b71c1c; }
+        .btn-gray { background-color: #666; }
+        .btn-gray:hover { background-color: #444; }
         .info-box { background-color: #dcf8c6; padding: 15px; border-radius: 5px; margin-top: 15px; border-left: 5px solid #25D366; }
         .grid-checkboxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 10px; margin-top: 15px; }
-        .grid-checkboxes label { background: #fff; border: 1px solid #ccc; padding: 10px; border-radius: 5px; cursor: pointer; text-align: center; font-size: 14px; }
-        .grid-checkboxes input:checked + span { font-weight: bold; color: #075e54; }
+        .grid-checkboxes label { background: #fff; border: 1px solid #ccc; padding: 10px; border-radius: 5px; cursor: pointer; text-align: center; font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .grid-checkboxes label:has(input:checked) { border-color: #25D366; background: #f0fff5; }
         .form-group { margin-top: 15px; }
         .form-group label { display: block; font-weight: bold; margin-bottom: 5px; }
-        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 14px; }
         textarea { resize: vertical; min-height: 100px; }
+        .row { display: flex; gap: 15px; flex-wrap: wrap; }
+        .row .form-group { flex: 1; min-width: 140px; }
         .dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
         .stat-card { background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .stat-card h3 { margin: 0; font-size: 14px; color: #666; }
         .stat-card p { margin: 10px 0 0; font-size: 24px; font-weight: bold; color: #075e54; }
-        .progress-container { margin-top: 20px; background: #eee; border-radius: 10px; height: 20px; overflow: hidden; }
+        .progress-container { margin-top: 12px; background: #eee; border-radius: 10px; height: 18px; overflow: hidden; }
         .progress-bar { background: #25D366; height: 100%; width: 0%; transition: 0.5s; }
         .nav { display: flex; gap: 10px; margin-bottom: 20px; }
         .nav a { padding: 10px 20px; background: #f0f0f0; border-radius: 5px; text-decoration: none; color: #075e54; font-weight: bold; }
         .nav a:hover { background: #e0e0e0; }
-        .time-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; margin-top: 15px; }
-        .time-grid label { background: #fff; border: 1px solid #ccc; padding: 10px; border-radius: 5px; cursor: pointer; text-align: center; font-size: 13px; }
-        .time-grid input:checked + span { font-weight: bold; color: #075e54; background: #dcf8c6; }
-        .btn-group-horizontal { display: flex; gap: 10px; margin-top: 15px; }
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.65); z-index: 1000; align-items: center; justify-content: center; }
-        .modal-overlay.active { display: flex; }
-        .modal-box { background: #fff; padding: 30px; border-radius: 12px; max-width: 460px; width: 90%; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-        .modal-box h2 { color: #d32f2f; margin-top: 0; }
-        .modal-stats { background: #f9f9f9; border-radius: 8px; padding: 14px; margin: 16px 0; display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
-        .modal-stats div { text-align: center; }
-        .modal-stats span { display: block; font-size: 22px; font-weight: bold; color: #075e54; }
-        .modal-stats small { color: #666; font-size: 12px; }
-        .zap-label { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap; }
+        .btn-group .btn { flex: 1; }
         .zap-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; }
         .zap-dot.online  { background: #25D366; }
         .zap-dot.offline { background: #d32f2f; }
-        .btn-stop { background-color: #d32f2f; display: none; }
-        .btn-stop:hover { background-color: #b71c1c; }
+        small.hint { display: block; color: #888; font-size: 12px; margin-top: 4px; }
+        /* Level badge */
+        .level-info { background: #e8f5e9; border-radius: 6px; padding: 10px 14px; margin-top: 10px; font-size: 13px; color: #2e7d32; }
+        /* Modals */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.65); z-index: 1000; align-items: center; justify-content: center; }
+        .modal-overlay.active { display: flex; }
+        .modal-box { background: #fff; padding: 30px; border-radius: 12px; max-width: 500px; width: 92%; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        .modal-box h2 { margin-top: 0; }
+        .modal-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: #f9f9f9; border-radius: 8px; padding: 14px; margin: 16px 0; text-align: center; }
+        .modal-stats span { display: block; font-size: 22px; font-weight: bold; color: #075e54; }
+        .modal-stats small { color: #666; font-size: 12px; }
+        /* Preview modal table */
+        .preview-table { width: 100%; border-collapse: collapse; margin: 14px 0; }
+        .preview-table td { padding: 7px 10px; border-bottom: 1px solid #eee; font-size: 14px; }
+        .preview-table td:first-child { font-weight: bold; color: #555; width: 50%; }
+        .preview-table td:last-child { color: #075e54; }
     </style>
 </head>
 <body>
-    <!-- Modal: Campanha Interrompida -->
-    <div class="modal-overlay" id="modalInterrupted">
-        <div class="modal-box">
-            <h2>⚠️ Disparo Interrompido Detectado</h2>
-            <p>O sistema encontrou uma campanha que não foi concluída. O que deseja fazer?</p>
-            <div class="modal-stats" id="modalStats">
-                <div><span id="modalPending">-</span><small>Pendentes</small></div>
-                <div><span id="modalSent">-</span><small>Enviados</small></div>
-                <div><span id="modalFailed">-</span><small>Falhas</small></div>
-            </div>
-            <div style="display:flex; gap:12px; margin-top:8px;">
-                <button class="btn btn-danger" style="flex:1;" onclick="suspendCampaign()">🗑️ Suspender</button>
-                <button class="btn" style="flex:1;" onclick="continueCampaign()">▶️ Continuar Disparo</button>
-            </div>
-            <p style="color:#999; font-size:12px; margin-bottom:0;">
-                <b>Suspender</b> apaga tudo e zera o dashboard.<br>
-                <b>Continuar</b> mantém os dados — configure os zaps e inicie normalmente.
-            </p>
+
+<!-- Modal: Campanha Interrompida -->
+<div class="modal-overlay" id="modalInterrupted">
+    <div class="modal-box">
+        <h2 style="color:#d32f2f;">⚠️ Disparo Interrompido Detectado</h2>
+        <p>O sistema encontrou uma campanha que não foi concluída. O que deseja fazer?</p>
+        <div class="modal-stats" id="modalStats">
+            <div><span id="modalPending">-</span><small>Pendentes</small></div>
+            <div><span id="modalSent">-</span><small>Enviados</small></div>
+            <div><span id="modalFailed">-</span><small>Falhas</small></div>
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-danger" onclick="suspendCampaign()">🗑️ Suspender</button>
+            <button class="btn" onclick="continueCampaign()">▶️ Continuar</button>
+        </div>
+        <p style="color:#999; font-size:12px; margin-bottom:0;">
+            <b>Suspender</b> apaga tudo e zera o dashboard.<br>
+            <b>Continuar</b> mantém os dados — configure e inicie normalmente.
+        </p>
+    </div>
+</div>
+
+<!-- Modal: Preview do plano de disparo -->
+<div class="modal-overlay" id="modalPreview">
+    <div class="modal-box">
+        <h2 style="color:#075e54;">📋 Plano de Disparo</h2>
+        <table class="preview-table" id="previewTable"></table>
+        <div class="btn-group">
+            <button class="btn btn-danger" style="flex:0.6;" onclick="closePreview()">Cancelar</button>
+            <button class="btn" onclick="confirmStart()">🚀 Confirmar e Iniciar</button>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <h1>🚀 Medusa — Orquestrador de Disparos</h1>
+
+    <div class="nav">
+        <a href="zaps.html">🔌 Gestão de Zaps</a>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="dashboard">
+        <div class="stat-card"><h3>Pendentes</h3><p id="statPending">0</p></div>
+        <div class="stat-card"><h3>Enviados</h3><p id="statSent">0</p></div>
+        <div class="stat-card"><h3>Falhas</h3><p id="statFailed" style="color:#d32f2f;">0</p></div>
+        <div class="stat-card"><h3>Status</h3><p id="statStatus">Pronto</p></div>
+    </div>
+
+    <div id="cycleProgress" style="display:none;" class="section">
+        <p id="progressText" style="margin:0 0 6px; font-weight:bold;">Progresso: 0/0</p>
+        <div class="progress-container"><div class="progress-bar" id="progressBar"></div></div>
+        <div class="btn-group" style="margin-top:14px;">
+            <button class="btn btn-secondary" onclick="downloadReport('enviados')">✅ Enviados.txt</button>
+            <button class="btn btn-secondary" onclick="downloadReport('invalidos')">🚫 Inválidos.txt</button>
+            <button class="btn btn-danger"    onclick="downloadReport('falhas')">❌ Falhas.txt</button>
         </div>
     </div>
 
-    <div class="container">
-        <h1>🚀 Medusa - Orquestrador de Disparos</h1>
-        
-        <div class="nav">
-            <a href="zaps.html">🔌 Gestão de Zaps</a>
-        </div>
+    <!-- 1. Upload -->
+    <div class="section">
+        <h2>1. Upload de Listas (Excel)</h2>
+        <form id="uploadForm">
+            <input type="file" id="excelFiles" accept=".xlsx,.xls" multiple required>
+            <div class="btn-group">
+                <button type="submit" class="btn" style="flex:2;">📂 Processar Listas</button>
+                <button type="button" class="btn btn-danger" style="flex:1;" onclick="clearQueue()">🧹 Limpar Fila</button>
+            </div>
+        </form>
+        <div id="uploadResult" class="info-box" style="display:none;"></div>
+    </div>
 
-        <div class="dashboard">
-            <div class="stat-card"><h3>Pendentes</h3><p id="statPending">0</p></div>
-            <div class="stat-card"><h3>Enviados</h3><p id="statSent">0</p></div>
-            <div class="stat-card"><h3>Falhas</h3><p id="statFailed" style="color: #d32f2f;">0</p></div>
-            <div class="stat-card"><h3>Status</h3><p id="statStatus">Pronto</p></div>
+    <!-- 2. Zaps -->
+    <div class="section">
+        <h2>2. Seleção de Zaps</h2>
+        <div class="grid-checkboxes" id="accountsGrid"></div>
+        <div class="btn-group">
+            <button class="btn btn-gray" onclick="selectAllAccounts()">Selecionar Todos</button>
+            <button class="btn btn-gray" style="background:#aaa;" onclick="clearAllAccounts()">Limpar Seleção</button>
         </div>
+    </div>
 
-        <div id="cycleProgress" style="display: none;">
-            <p id="progressText">Progresso do Ciclo: 0/0</p>
-            <div class="progress-container"><div class="progress-bar" id="progressBar"></div></div>
-            <div style="margin-top: 10px; display: flex; gap: 10px;">
-                <button class="btn btn-secondary" onclick="downloadReport()">📄 Relatório</button>
-                <button class="btn btn-secondary" onclick="downloadFailures()">❌ Falhas</button>
+    <!-- 3. Configuração -->
+    <div class="section">
+        <h2>3. Configuração de Disparo</h2>
+
+        <div class="row">
+            <div class="form-group">
+                <label>⏰ Início da janela</label>
+                <input type="time" id="startTime" value="08:00" step="900">
+            </div>
+            <div class="form-group">
+                <label>⏰ Fim da janela</label>
+                <input type="time" id="endTime" value="20:00" step="900">
             </div>
         </div>
+        <small class="hint">Disparos ocorrem apenas dentro dessa janela de horário. Deixe vazio para sem restrição.</small>
 
-        <div class="section">
-            <h2>1. Upload de Listas (Excel)</h2>
-            <form id="uploadForm">
-                <input type="file" id="excelFiles" accept=".xlsx, .xls" multiple required>
-                <div class="btn-group-horizontal">
-                    <button type="submit" class="btn" style="flex: 2;">Processar Listas</button>
-                    <button type="button" class="btn btn-danger" style="flex: 1;" onclick="clearQueue()">🧹 Limpar Fila</button>
-                </div>
-            </form>
-            <div id="uploadResult" class="info-box" style="display: none;"></div>
-        </div>
-
-        <div class="section">
-            <h2>2. Seleção de Zaps</h2>
-            <p>Selecione os Zaps que vão disparar:</p>
-            <div class="grid-checkboxes" id="accountsGrid"></div>
-            <button class="btn" style="background-color: #666; margin-top: 15px;" onclick="selectAllAccounts()">Selecionar Todas</button>
-        </div>
-
-        <div class="section">
-            <h2>3. Configuração de Disparo</h2>
-            
+        <div class="row" style="margin-top:15px;">
             <div class="form-group">
-                <label>📊 Mensagens por Ciclo (total a cada 45 min):</label>
-                <input type="number" id="msgsPerCycle" value="384" min="5" max="1000">
-                <small style="color: #666; display:block; margin-top:4px;">
-                    <b>Sugestão:</b> 384 mensagens para 24 zaps = ~16 disparos por zap a cada 45 min.
-                </small>
+                <label>⚡ Nível de Disparo</label>
+                <select id="dispatchLevel" onchange="updateLevelInfo()">
+                    <option value="1">Nível 1 — Lento (3 msgs/zap/onda, 90-150s)</option>
+                    <option value="2" selected>Nível 2 — Médio (5 msgs/zap/onda, 60-90s)</option>
+                    <option value="3">Nível 3 — Rápido (8 msgs/zap/onda, 45-70s)</option>
+                </select>
             </div>
-
             <div class="form-group">
-                <label>⏰ Selecione os Horários de Disparo (Ciclos):</label>
-                <div class="time-grid" id="timeGrid"></div>
-                <small style="color: #666; display: block; margin-top: 10px;">Cada horário inicia um ciclo de <b>45 min</b> de disparo, com 15 min de descanso até o próximo.</small>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>4. Conteúdo da Mensagem</h2>
-            
-            <div class="form-group">
-                <label>💬 Texto (Suporta Spintax: {Olá|Oi} {João|Amigo}):</label>
-                <textarea id="messageText" placeholder="Digite sua mensagem aqui..."></textarea>
-            </div>
-
-            <div class="form-group">
-                <label>📸 Mídia (Opcional):</label>
-                <input type="file" id="mediaFile" accept="video/mp4, image/jpeg, image/png">
-            </div>
-
-            <div class="form-group">
-                <label>📝 Modo de Envio:</label>
-                <select id="mediaMode">
-                    <option value="caption">Texto como Legenda da Mídia</option>
-                    <option value="separate">Mídia separada (Texto depois Mídia)</option>
+                <label>🔥 Nível de Aquecimento</label>
+                <select id="warmupLevel">
+                    <option value="1">Nível 1 — Muito lento (3-5 min)</option>
+                    <option value="2">Nível 2 — Lento (2-3 min)</option>
+                    <option value="3">Nível 3 — Moderado (90-120s)</option>
+                    <option value="4">Nível 4 — Moderado+ (1-1.5 min)</option>
+                    <option value="5" selected>Nível 5 — Padrão (45-60s)</option>
+                    <option value="6">Nível 6 — Ativo (30-45s + áudio)</option>
+                    <option value="7">Nível 7 — Intenso (20-30s + mídia)</option>
+                    <option value="8">Nível 8 — Muito intenso (15-20s)</option>
+                    <option value="9">Nível 9 — Alto (10-15s)</option>
+                    <option value="10">Nível 10 — Máximo (8-12s)</option>
                 </select>
             </div>
         </div>
+        <div class="level-info" id="levelInfo"></div>
+    </div>
 
-        <button class="btn" id="btnStart" style="font-size: 18px; padding: 15px;" onclick="startCampaign()">🚀 INICIAR ORQUESTRADOR</button>
-        <button class="btn btn-stop" id="btnStop" style="font-size: 18px; padding: 15px; margin-top: 10px;" onclick="stopCampaign()">🛑 PARAR CAMPANHA</button>
-
-        <div class="section" style="margin-top: 30px;">
-            <h2>Envio de Teste</h2>
-            <p>Envia uma mensagem usando as configurações acima para um número específico antes de disparar para toda a lista.</p>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
-                <div class="form-group" style="flex: 1; min-width: 180px; margin: 0;">
-                    <label>Zap para testar:</label>
-                    <select id="testAccountId"></select>
-                </div>
-                <div class="form-group" style="flex: 2; min-width: 200px; margin: 0;">
-                    <label>Número de destino (com DDI):</label>
-                    <input type="text" id="testPhone" placeholder="5511999999999">
-                </div>
-                <button class="btn btn-secondary" id="btnTestSend" style="height: 42px; white-space: nowrap;" onclick="sendTest()">📤 Enviar Teste</button>
-            </div>
-            <div id="testResult" class="info-box" style="display: none; margin-top: 15px;"></div>
+    <!-- 4. Conteúdo -->
+    <div class="section">
+        <h2>4. Conteúdo da Mensagem</h2>
+        <div class="form-group">
+            <label>💬 Texto (suporta Spintax: <code>{Olá|Oi} {João|amigo}</code>):</label>
+            <textarea id="messageText" placeholder="Digite sua mensagem aqui..."></textarea>
+        </div>
+        <div class="form-group">
+            <label>📸 Mídia (opcional):</label>
+            <input type="file" id="mediaFile" accept="video/mp4,image/jpeg,image/png,image/gif">
+        </div>
+        <div class="form-group">
+            <label>📝 Modo de Envio:</label>
+            <select id="mediaMode">
+                <option value="caption">Texto como legenda da mídia</option>
+                <option value="separate">Mídia separada (texto primeiro, depois mídia)</option>
+            </select>
         </div>
     </div>
 
-    <script>
-        let currentCycleId = null;
+    <!-- Botões principais -->
+    <div class="btn-group">
+        <button class="btn" id="btnStart" style="font-size:17px; padding:15px;" onclick="previewCampaign()">📋 Visualizar Plano</button>
+        <button class="btn btn-danger" id="btnStop" style="font-size:17px; padding:15px; display:none;" onclick="stopCampaign()">🛑 PARAR CAMPANHA</button>
+    </div>
 
-        // Gerar checkboxes dos 24 Zaps com dot de status
-        const accountsGrid = document.getElementById('accountsGrid');
-        for (let i = 1; i <= 24; i++) {
-            const num = i.toString().padStart(2, '0');
-            const id = `WA-${num}`;
-            accountsGrid.innerHTML += `
-                <label>
-                    <input type="checkbox" class="zap-cb" value="${id}">
-                    <span class="zap-label">
-                        <span>${id}</span>
-                        <span class="zap-dot offline" id="dot-${id}"></span>
-                    </span>
-                </label>`;
-        }
+    <!-- Teste de envio -->
+    <div class="section" style="margin-top:25px;">
+        <h2>Envio de Teste</h2>
+        <div class="row" style="align-items:flex-end;">
+            <div class="form-group" style="flex:1;">
+                <label>Zap:</label>
+                <select id="testAccountId"></select>
+            </div>
+            <div class="form-group" style="flex:2;">
+                <label>Número destino (com DDI):</label>
+                <input type="text" id="testPhone" placeholder="5511999999999">
+            </div>
+            <div style="flex:1; margin-top:15px;">
+                <button class="btn btn-secondary" id="btnTestSend" onclick="sendTest()">📤 Enviar Teste</button>
+            </div>
+        </div>
+        <div id="testResult" class="info-box" style="display:none; margin-top:15px;"></div>
+    </div>
+</div>
 
-        // Popular select do envio de teste
-        const testSelect = document.getElementById('testAccountId');
-        for (let i = 1; i <= 24; i++) {
-            const id = `WA-${String(i).padStart(2, '0')}`;
-            testSelect.innerHTML += `<option value="${id}">${id}</option>`;
-        }
+<script>
+    // ── Dados de configuração de níveis ──────────────────────────────────────
+    const DISPATCH_LEVELS = {
+        1: { batchPerZap: 3, minDelayS: 90,  maxDelayS: 150, label: '3 msgs/zap/onda · delay 90-150s' },
+        2: { batchPerZap: 5, minDelayS: 60,  maxDelayS:  90, label: '5 msgs/zap/onda · delay 60-90s'  },
+        3: { batchPerZap: 8, minDelayS: 45,  maxDelayS:  70, label: '8 msgs/zap/onda · delay 45-70s'  },
+    };
 
-        async function refreshZapStatus() {
-            try {
-                const res  = await fetch('/api/zaps-status');
-                const data = await res.json();
-                data.forEach(zap => {
-                    const dot = document.getElementById(`dot-${zap.accountId}`);
-                    if (dot) {
-                        dot.className = 'zap-dot ' + (zap.connected ? 'online' : 'offline');
-                        dot.title = zap.connected ? 'Conectado' : 'Desconectado';
-                    }
-                });
-            } catch (_) {}
-        }
+    let currentCycleId   = null;
+    let pendingFormData  = null; // salvo entre previewCampaign e confirmStart
 
-        // Gerar checkboxes de horários — apenas horas cheias de 08:00 a 21:00
-        // Cada slot = 45 min de disparo + 15 min de descanso natural até o próximo
-        const timeGrid = document.getElementById('timeGrid');
-        for (let hour = 8; hour <= 21; hour++) {
-            const time = `${hour.toString().padStart(2, '0')}:00`;
-            timeGrid.innerHTML += `<label><input type="checkbox" class="time-cb" value="${time}"> <span>${time}</span></label>`;
-        }
+    // ── Build UI ──────────────────────────────────────────────────────────────
+    const accountsGrid = document.getElementById('accountsGrid');
+    const testSelect   = document.getElementById('testAccountId');
+    for (let i = 1; i <= 24; i++) {
+        const id  = `WA-${String(i).padStart(2, '0')}`;
+        accountsGrid.innerHTML += `
+            <label>
+                <input type="checkbox" class="zap-cb" value="${id}">
+                <span>${id}</span>
+                <span class="zap-dot offline" id="dot-${id}"></span>
+            </label>`;
+        testSelect.innerHTML += `<option value="${id}">${id}</option>`;
+    }
 
-        function selectAllAccounts() {
-            document.querySelectorAll('.zap-cb').forEach(cb => cb.checked = true);
-        }
+    // ── Level info box ────────────────────────────────────────────────────────
+    function updateLevelInfo() {
+        const level   = parseInt(document.getElementById('dispatchLevel').value);
+        const cfg     = DISPATCH_LEVELS[level];
+        const zaps    = document.querySelectorAll('.zap-cb:checked').length || '?';
+        const msgsWave = typeof zaps === 'number' ? cfg.batchPerZap * zaps : `${cfg.batchPerZap} × zaps`;
+        document.getElementById('levelInfo').innerHTML =
+            `<b>Nível ${level}:</b> ${cfg.label} · Onda de <b>~${msgsWave}</b> mensagens · Stagger ${cfg.minDelayS}s entre sub-grupos · Aquecimento 10 min entre ondas`;
+    }
+    document.getElementById('dispatchLevel').addEventListener('change', updateLevelInfo);
+    document.querySelectorAll('.zap-cb').forEach(cb => cb.addEventListener('change', updateLevelInfo));
+    updateLevelInfo();
 
-        async function updateDashboard() {
-            try {
-                const res = await fetch('/api/dashboard-stats');
-                const data = await res.json();
-                document.getElementById('statPending').innerText = data.totalPending;
-                document.getElementById('statSent').innerText = data.totalSent;
-                document.getElementById('statFailed').innerText = data.totalFailed;
+    // ── Zap status ────────────────────────────────────────────────────────────
+    async function refreshZapStatus() {
+        try {
+            const data = await (await fetch('/api/zaps-status')).json();
+            data.forEach(zap => {
+                const dot = document.getElementById(`dot-${zap.accountId}`);
+                if (dot) dot.className = 'zap-dot ' + (zap.connected ? 'online' : 'offline');
+            });
+            updateLevelInfo();
+        } catch (_) {}
+    }
 
-                const progress = document.getElementById('cycleProgress');
-                if (data.lastCycle) {
-                    currentCycleId = data.lastCycle.id;
-                    const status = data.lastCycle.status;
-                    document.getElementById('statStatus').innerText = status.toUpperCase();
-                    progress.style.display = 'block';
-                    const total = data.lastCycle.total_messages;
-                    const processed = data.lastCycle.sent_count + data.lastCycle.fail_count;
-                    document.getElementById('progressText').innerText = `Progresso do Ciclo: ${processed}/${total}`;
-                    document.getElementById('progressBar').style.width = total > 0 ? `${(processed / total) * 100}%` : '0%';
-                    // Mostra botão Parar apenas quando campanha está ativa
-                    const isActive = status === 'em_andamento';
-                    document.getElementById('btnStop').style.display  = isActive ? 'block' : 'none';
-                    document.getElementById('btnStart').style.display = isActive ? 'none'  : 'block';
-                } else {
-                    document.getElementById('statStatus').innerText = 'Pronto';
-                    progress.style.display = 'none';
-                    currentCycleId = null;
-                    document.getElementById('btnStop').style.display  = 'none';
-                    document.getElementById('btnStart').style.display = 'block';
-                }
-            } catch (e) {}
-        }
+    function selectAllAccounts() { document.querySelectorAll('.zap-cb').forEach(cb => cb.checked = true); updateLevelInfo(); }
+    function clearAllAccounts()  { document.querySelectorAll('.zap-cb').forEach(cb => cb.checked = false); updateLevelInfo(); }
 
-        async function checkInterrupted() {
-            try {
-                const res = await fetch('/api/check-interrupted');
-                const data = await res.json();
-                if (data.interrupted) {
-                    document.getElementById('modalPending').innerText = data.interrupted.pending;
-                    document.getElementById('modalSent').innerText = data.interrupted.sent_count;
-                    document.getElementById('modalFailed').innerText = data.interrupted.fail_count;
-                    document.getElementById('modalInterrupted').classList.add('active');
-                }
-            } catch (e) {}
-        }
+    // ── Dashboard ─────────────────────────────────────────────────────────────
+    async function updateDashboard() {
+        try {
+            const data = await (await fetch('/api/dashboard-stats')).json();
+            document.getElementById('statPending').innerText = data.totalPending;
+            document.getElementById('statSent').innerText    = data.totalSent;
+            document.getElementById('statFailed').innerText  = data.totalFailed;
 
-        async function suspendCampaign() {
-            try {
-                await fetch('/api/suspend-campaign', { method: 'POST' });
-            } catch (e) {}
-            document.getElementById('modalInterrupted').classList.remove('active');
-            updateDashboard();
-        }
-
-        function continueCampaign() {
-            document.getElementById('modalInterrupted').classList.remove('active');
-        }
-
-        setInterval(updateDashboard, 3000);
-
-        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData();
-            const files = document.getElementById('excelFiles').files;
-            for (let i = 0; i < files.length; i++) formData.append('excelFiles', files[i]);
-            
-            const res = await fetch('/api/upload-lists', { method: 'POST', body: formData });
-            const data = await res.json();
-            document.getElementById('uploadResult').style.display = 'block';
-            document.getElementById('uploadResult').innerHTML = `
-                <strong>✅ Processamento Concluído!</strong><br>
-                Total de Contatos Únicos: <strong>${data.totalUnicos}</strong><br>
-                Contatos Recebidos: ${data.totalRecebidos}
-            `;
-            updateDashboard();
-        });
-
-        async function clearQueue() {
-            if (!confirm('⚠️ Tem certeza que deseja remover TODAS as mensagens pendentes da fila?')) return;
-            try {
-                const res = await fetch('/api/clear-queue', { method: 'POST' });
-                const data = await res.json();
-                alert(data.message);
-                updateDashboard();
-            } catch (error) {
-                alert('Erro ao limpar fila.');
+            if (data.lastCycle) {
+                currentCycleId = data.lastCycle.id;
+                const status    = data.lastCycle.status;
+                const processed = data.lastCycle.sent_count + data.lastCycle.fail_count;
+                const total     = data.lastCycle.total_messages;
+                document.getElementById('statStatus').innerText = status.toUpperCase();
+                document.getElementById('cycleProgress').style.display = 'block';
+                document.getElementById('progressText').innerText = `Progresso: ${processed}/${total}`;
+                document.getElementById('progressBar').style.width = total > 0 ? `${(processed / total) * 100}%` : '0%';
+                const isActive = status === 'em_andamento';
+                document.getElementById('btnStop').style.display  = isActive ? 'block' : 'none';
+                document.getElementById('btnStart').style.display = isActive ? 'none'  : 'block';
+            } else {
+                document.getElementById('statStatus').innerText = 'Pronto';
+                document.getElementById('cycleProgress').style.display = 'none';
+                document.getElementById('btnStop').style.display  = 'none';
+                document.getElementById('btnStart').style.display = 'block';
+                currentCycleId = null;
             }
-        }
+        } catch (_) {}
+    }
 
-        async function stopCampaign() {
-            if (!confirm('Deseja realmente parar a campanha? Os envios em andamento serão finalizados antes de parar.')) return;
-            try {
-                const res  = await fetch('/api/stop-campaign', { method: 'POST' });
-                const data = await res.json();
-                alert(data.message);
-            } catch (e) {
-                alert('Erro ao enviar sinal de parada.');
+    // ── Interrupted modal ─────────────────────────────────────────────────────
+    async function checkInterrupted() {
+        try {
+            const data = await (await fetch('/api/check-interrupted')).json();
+            if (data.interrupted) {
+                document.getElementById('modalPending').innerText = data.interrupted.pending;
+                document.getElementById('modalSent').innerText    = data.interrupted.sent_count;
+                document.getElementById('modalFailed').innerText  = data.interrupted.fail_count;
+                document.getElementById('modalInterrupted').classList.add('active');
             }
-        }
+        } catch (_) {}
+    }
 
-        async function sendTest() {
-            const accountId = document.getElementById('testAccountId').value;
-            const phone     = document.getElementById('testPhone').value.trim().replace(/\D/g, '');
-            if (!phone) return alert('Informe o número de destino.');
-
-            const btn = document.getElementById('btnTestSend');
-            btn.disabled = true;
-            btn.innerHTML = '⏳ Enviando...';
-
-            const formData = new FormData();
-            formData.append('accountId', accountId);
-            formData.append('phone', phone);
-            formData.append('messageText', document.getElementById('messageText').value);
-            formData.append('mediaMode', document.getElementById('mediaMode').value);
-            const media = document.getElementById('mediaFile').files[0];
-            if (media) formData.append('mediaFile', media);
-
-            try {
-                const res  = await fetch('/api/test-send', { method: 'POST', body: formData });
-                const data = await res.json();
-                const box  = document.getElementById('testResult');
-                box.style.display = 'block';
-                box.style.borderColor = data.error ? '#d32f2f' : '#25D366';
-                box.innerText = data.message || data.error;
-            } catch (e) {
-                alert('Erro ao enviar teste.');
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = '📤 Enviar Teste';
-            }
-        }
-
-        async function startCampaign() {
-            const selectedZaps = Array.from(document.querySelectorAll('.zap-cb:checked')).map(cb => cb.value);
-            const selectedTimes = Array.from(document.querySelectorAll('.time-cb:checked')).map(cb => cb.value);
-            
-            if (selectedZaps.length === 0) return alert('⚠️ Selecione pelo menos 1 Zap.');
-            if (selectedTimes.length === 0) return alert('⚠️ Selecione pelo menos 1 horário.');
-
-            const formData = new FormData();
-            formData.append('accounts', JSON.stringify(selectedZaps));
-            formData.append('messageText', document.getElementById('messageText').value);
-            formData.append('mediaMode', document.getElementById('mediaMode').value);
-            formData.append('msgsPerCycle', document.getElementById('msgsPerCycle').value);
-            formData.append('selectedTimes', JSON.stringify(selectedTimes));
-            
-            const media = document.getElementById('mediaFile').files[0];
-            if (media) formData.append('mediaFile', media);
-
-            const btn = document.getElementById('btnStart');
-            btn.innerHTML = '⏳ ORQUESTRADOR EM EXECUÇÃO...';
-            btn.style.backgroundColor = '#ff9800';
-            btn.disabled = true;
-
-            try {
-                const res = await fetch('/api/start-campaign', { method: 'POST', body: formData });
-                const data = await res.json();
-                alert(data.message || data.error);
-            } catch (error) {
-                alert('Erro ao conectar com o servidor.');
-            } finally {
-                btn.innerHTML = '🚀 INICIAR ORQUESTRADOR';
-                btn.style.backgroundColor = '#25D366';
-                btn.disabled = false;
-            }
-        }
-
-        function downloadReport() { if (currentCycleId) window.location.href = `/api/report/${currentCycleId}`; }
-        function downloadFailures() { if (currentCycleId) window.location.href = `/api/failure-list/${currentCycleId}`; }
-
-        checkInterrupted();
+    async function suspendCampaign() {
+        await fetch('/api/suspend-campaign', { method: 'POST' }).catch(() => {});
+        document.getElementById('modalInterrupted').classList.remove('active');
         updateDashboard();
-        refreshZapStatus();
-        setInterval(refreshZapStatus, 10000);
-    </script>
+    }
+
+    function continueCampaign() {
+        document.getElementById('modalInterrupted').classList.remove('active');
+    }
+
+    // ── Upload ────────────────────────────────────────────────────────────────
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData();
+        Array.from(document.getElementById('excelFiles').files).forEach(f => formData.append('excelFiles', f));
+        try {
+            const res  = await fetch('/api/upload-lists', { method: 'POST', body: formData });
+            const data = await res.json();
+            const box  = document.getElementById('uploadResult');
+            box.style.display = 'block';
+            if (data.error) {
+                box.style.borderColor = '#d32f2f';
+                box.innerHTML = `❌ ${data.error}`;
+            } else {
+                box.style.borderColor = '#25D366';
+                box.innerHTML = `✅ <strong>${data.totalUnicos}</strong> contatos únicos importados (${data.totalRecebidos} recebidos).`;
+            }
+            updateDashboard();
+        } catch (_) { alert('Erro ao processar arquivos.'); }
+    });
+
+    async function clearQueue() {
+        if (!confirm('⚠️ Remover TODOS os contatos pendentes da fila?')) return;
+        await fetch('/api/clear-queue', { method: 'POST' });
+        alert('✅ Fila limpa.');
+        updateDashboard();
+    }
+
+    // ── Preview modal ─────────────────────────────────────────────────────────
+    function previewCampaign() {
+        const selectedZaps = Array.from(document.querySelectorAll('.zap-cb:checked')).map(cb => cb.value);
+        if (selectedZaps.length === 0) return alert('⚠️ Selecione pelo menos 1 Zap.');
+
+        const level     = parseInt(document.getElementById('dispatchLevel').value);
+        const wLevel    = parseInt(document.getElementById('warmupLevel').value);
+        const cfg       = DISPATCH_LEVELS[level];
+        const startTime = document.getElementById('startTime').value;
+        const endTime   = document.getElementById('endTime').value;
+        const msgsWave  = cfg.batchPerZap * selectedZaps.length;
+        const numGroups = Math.ceil(selectedZaps.length / 4);
+        const waveMinS  = cfg.minDelayS * cfg.batchPerZap + numGroups * cfg.minDelayS;
+
+        document.getElementById('previewTable').innerHTML = `
+            <tr><td>Zaps selecionados</td><td>${selectedZaps.length} (${numGroups} sub-grupos de 4)</td></tr>
+            <tr><td>Janela de horário</td><td>${(startTime && endTime) ? `${startTime} – ${endTime}` : 'Sem restrição'}</td></tr>
+            <tr><td>Nível de disparo</td><td>Nível ${level} — ${cfg.label}</td></tr>
+            <tr><td>Nível de aquecimento</td><td>Nível ${wLevel}</td></tr>
+            <tr><td>Msgs por onda</td><td>≈ ${msgsWave}</td></tr>
+            <tr><td>Duração estimada/onda</td><td>≈ ${Math.round(waveMinS / 60)} min (+ 10 min de aquecimento)</td></tr>
+            <tr><td>Rotação de IP</td><td>A cada 3 ondas (escalonada)</td></tr>
+        `;
+
+        // Salva dados para o confirmStart
+        const fd = new FormData();
+        fd.append('accounts',      JSON.stringify(selectedZaps));
+        fd.append('messageText',   document.getElementById('messageText').value);
+        fd.append('mediaMode',     document.getElementById('mediaMode').value);
+        fd.append('startTime',     startTime);
+        fd.append('endTime',       endTime);
+        fd.append('dispatchLevel', level);
+        fd.append('warmupLevel',   wLevel);
+        const media = document.getElementById('mediaFile').files[0];
+        if (media) fd.append('mediaFile', media);
+        pendingFormData = fd;
+
+        document.getElementById('modalPreview').classList.add('active');
+    }
+
+    function closePreview() {
+        document.getElementById('modalPreview').classList.remove('active');
+        pendingFormData = null;
+    }
+
+    async function confirmStart() {
+        if (!pendingFormData) return;
+        document.getElementById('modalPreview').classList.remove('active');
+
+        const btn = document.getElementById('btnStart');
+        btn.innerHTML = '⏳ Iniciando...';
+        btn.disabled  = true;
+
+        try {
+            const res  = await fetch('/api/start-campaign', { method: 'POST', body: pendingFormData });
+            const data = await res.json();
+            if (data.error) {
+                alert('❌ ' + data.error);
+            } else {
+                alert(`✅ ${data.message}\nContatos: ${data.info.totalContatos} | Zaps: ${data.info.zapsSelecionados}`);
+            }
+        } catch (_) {
+            alert('Erro ao conectar com o servidor.');
+        } finally {
+            btn.innerHTML = '📋 Visualizar Plano';
+            btn.disabled  = false;
+            pendingFormData = null;
+            updateDashboard();
+        }
+    }
+
+    async function stopCampaign() {
+        if (!confirm('Deseja realmente parar a campanha?')) return;
+        await fetch('/api/stop-campaign', { method: 'POST' });
+        alert('🛑 Sinal de parada enviado. O sistema finalizará a onda atual.');
+    }
+
+    // ── Relatórios ────────────────────────────────────────────────────────────
+    function downloadReport(type) {
+        window.location.href = `/api/report/${type}`;
+    }
+
+    // ── Teste de envio ────────────────────────────────────────────────────────
+    async function sendTest() {
+        const phone = document.getElementById('testPhone').value.trim().replace(/\D/g, '');
+        if (!phone) return alert('Informe o número de destino.');
+
+        const btn = document.getElementById('btnTestSend');
+        btn.disabled  = true;
+        btn.innerHTML = '⏳ Enviando...';
+
+        const fd = new FormData();
+        fd.append('accountId',   document.getElementById('testAccountId').value);
+        fd.append('phone',       phone);
+        fd.append('messageText', document.getElementById('messageText').value);
+        fd.append('mediaMode',   document.getElementById('mediaMode').value);
+        const media = document.getElementById('mediaFile').files[0];
+        if (media) fd.append('mediaFile', media);
+
+        try {
+            const res  = await fetch('/api/test-send', { method: 'POST', body: fd });
+            const data = await res.json();
+            const box  = document.getElementById('testResult');
+            box.style.display = 'block';
+            box.style.borderColor = data.error ? '#d32f2f' : '#25D366';
+            box.innerText = data.message || data.error;
+        } catch (_) {
+            alert('Erro ao enviar teste.');
+        } finally {
+            btn.disabled  = false;
+            btn.innerHTML = '📤 Enviar Teste';
+        }
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    checkInterrupted();
+    updateDashboard();
+    refreshZapStatus();
+    setInterval(updateDashboard,    3_000);
+    setInterval(refreshZapStatus,  10_000);
+</script>
 </body>
 </html>
