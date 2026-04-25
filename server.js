@@ -98,14 +98,15 @@ app.get('/api/zaps-status', async (req, res) => {
         instances.forEach(inst => {
             const name  = inst.instanceName || inst.name;
             const state = inst.connectionStatus || inst.instance?.state || inst.state || 'close';
-            instanceMap[name] = state;
+            if (name) instanceMap[name] = state;
         });
 
         const status = [];
         for (let i = 1; i <= 48; i++) {
-            const accountId = `WA-${String(i).padStart(2, '0')}`;
-            const state     = instanceMap[accountId] || 'close';
-            status.push({ accountId, connected: state === 'open', state });
+            const accountId   = `WA-${String(i).padStart(2, '0')}`;
+            const hasInstance = accountId in instanceMap;
+            const state       = hasInstance ? instanceMap[accountId] : 'close';
+            status.push({ accountId, connected: state === 'open', state, hasInstance });
         }
         res.json(status);
     } catch (err) {

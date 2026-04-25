@@ -203,30 +203,40 @@
 
                 let statusClass, statusText;
                 if (zap.state === 'open') {
-                    statusClass = 'status-online';    statusText = '✅ Ativo';
+                    statusClass = 'status-online';     statusText = '✅ Ativo';
                 } else if (zap.state === 'connecting') {
                     statusClass = 'status-connecting'; statusText = '⏳ Conectando';
+                } else if (zap.hasInstance) {
+                    statusClass = 'status-offline';    statusText = '❌ Inativo (cache)';
                 } else {
-                    statusClass = 'status-offline';    statusText = '❌ Inativo';
+                    statusClass = 'status-offline';    statusText = '⬜ Sem sessão';
                 }
+
+                const connectLabel = zap.state === 'open'  ? '✅ Conectado'
+                                   : zap.hasInstance       ? '🔄 Reconectar'
+                                   :                         '📷 Conectar QR';
+
+                const connectDisabled = zap.state === 'open' ? 'disabled' : '';
 
                 card.innerHTML = `
                     <h3>${zap.accountId}</h3>
                     <div class="status-badge ${statusClass}">${statusText}</div>
                     <div class="btn-group">
-                        <button class="btn btn-secondary" onclick="connectZap('${zap.accountId}', '${zap.state}')">Conectar</button>
-                        <button class="btn btn-danger"    onclick="deleteZap('${zap.accountId}')" title="Remove sessão">🗑️</button>
+                        <button class="btn btn-secondary" ${connectDisabled}
+                            onclick="connectZap('${zap.accountId}', '${zap.state}', ${zap.hasInstance})">
+                            ${connectLabel}
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteZap('${zap.accountId}')"
+                            title="Apagar sessão/cache" ${!zap.hasInstance ? 'disabled' : ''}>🗑️</button>
                     </div>`;
                 container.appendChild(card);
             });
         }
 
         // ── Conectar Zap ──────────────────────────────────────
-        async function connectZap(accountId, currentState) {
-            if (currentState === 'open') {
-                alert(`${accountId} já está conectado.`);
-                return;
-            }
+        async function connectZap(accountId, currentState, hasInstance) {
+            if (currentState === 'open') return;
+
             try {
                 const res  = await fetch('/api/whatsapp/start', {
                     method: 'POST',
@@ -236,13 +246,18 @@
                 const data = await res.json();
 
                 if (data.connected) {
-                    alert(`✅ ${accountId} já está conectado.`);
                     refreshStatus();
                     return;
                 }
 
-                // Exibe modal com QR code
-                openQRModal(accountId);
+                if (data.qrcode) {
+                    // Sem cache — precisa escanear QR
+                    openQRModal(accountId);
+                } else if (hasInstance) {
+                    // Tem cache — reconectando em background, só atualiza status
+                    refreshStatus();
+                    setTimeout(refreshStatus, 4000);
+                }
             } catch (_) {
                 alert('Erro ao conectar.');
             }
@@ -272,20 +287,27 @@
             try {
                 const res  = await fetch('/api/zaps-status');
                 const data = await res.json();
-                // Inclui todos (a Evolution auto-reconecta quem já tinha sessão)
-                allAccounts = data.map(z => z.accountId);
+                // Só reconecta quem já tem instância/cache salvo na Evolution API
+                allAccounts = data.filter(z => z.hasInstance).map(z => z.accountId);
                 renderZapCards(data);
             } catch (_) {
                 label.textContent = '❌ Erro ao verificar status.';
                 return;
             }
 
+            if (allAccounts.length === 0) {
+                label.textContent = '⚠️ Nenhum zap com sessão salva para reconectar.';
+                btn.disabled  = false;
+                btn.innerHTML = '⚡ Reconectar Todos';
+                return;
+            }
+
             const total = allAccounts.length;
-            btn.disabled = true;
+            btn.disabled  = true;
             btn.innerHTML = '⏳ Reconectando...';
             bar.style.display = 'block';
-            fill.style.width = '0%';
-            label.textContent = `Iniciando ${total} instâncias... 0 / ${total} conectadas`;
+            fill.style.width  = '0%';
+            label.textContent = `Reconectando ${total} zap(s) com cache... 0 / ${total} online`;
 
             await fetch('/api/whatsapp/start-bulk', {
                 method: 'POST',
