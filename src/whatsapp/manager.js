@@ -142,11 +142,18 @@ export const initializeAccount = async (accountId, attempt = 1) => {
 
         authRetries[accountId] = (authRetries[accountId] || 0) + 1;
 
-        // Se tem cache salvo, tenta reconectar automaticamente antes de pedir nova leitura
+        // Se tem cache salvo, tenta reconectar automaticamente antes de pedir nova leitura.
+        // Delay de 12s: no Windows o Chromium demora para liberar todos os file locks.
+        // 5s era insuficiente e causava "onQRChangedEvent already exists" no novo client.
         if (hasSessionCache(accountId) && authRetries[accountId] <= MAX_AUTH_RETRIES) {
-            console.log(`[${accountId}] Cache existe. Retry automático ${authRetries[accountId]}/${MAX_AUTH_RETRIES} em 5s...`);
+            console.log(`[${accountId}] Cache existe. Retry automático ${authRetries[accountId]}/${MAX_AUTH_RETRIES} em 12s...`);
             try { await client.destroy(); } catch (_) {}
-            await new Promise(r => setTimeout(r, 5000));
+            await new Promise(r => setTimeout(r, 12000));
+            // Limpa locks residuais antes de tentar novo Chromium
+            const sessionDir = path.resolve(__dirname, '../../.wwebjs_auth', `session-${accountId}`);
+            ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].forEach(lf => {
+                try { const p = path.join(sessionDir, lf); if (fs.existsSync(p)) fs.unlinkSync(p); } catch (_) {}
+            });
             initializeAccount(accountId, 1).catch(e =>
                 console.error(`[${accountId}] Erro no retry de auth_failure:`, e.message)
             );
@@ -202,7 +209,8 @@ export const initializeAccount = async (accountId, attempt = 1) => {
         // "The browser is already running" = Chromium órfão da sessão anterior ainda está vivo
         // e deixou um lock file. Remove o lock e retenta — a sessão em si está intacta.
         const isBrowserLocked = error?.message?.toLowerCase().includes('already running') ||
-                                error?.message?.toLowerCase().includes('already open');
+                                error?.message?.toLowerCase().includes('already open') ||
+                                error?.message?.includes('onQRChangedEvent');
         if (isBrowserLocked && attempt < MAX_RETRIES) {
             const sessionDir = path.resolve(__dirname, '../../.wwebjs_auth', `session-${accountId}`);
             ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].forEach(lf => {
