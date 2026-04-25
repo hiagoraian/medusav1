@@ -30,7 +30,12 @@
         .nav { display: flex; gap: 10px; margin-bottom: 20px; }
         .nav a { padding: 10px 20px; background: #f0f0f0; border-radius: 5px; text-decoration: none; color: #075e54; font-weight: bold; }
         .nav a:hover { background: #e0e0e0; }
-        .warmup-controls { display: flex; gap: 10px; margin-top: 15px; }
+        .warmup-controls { display: flex; gap: 10px; margin-top: 15px; align-items: center; flex-wrap: wrap; }
+        .warmup-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: #ccc; flex-shrink: 0; }
+        .warmup-dot.online  { background: #25D366; }
+        .warmup-dot.offline { background: #d32f2f; }
+        .level-select { padding: 8px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; background: #fff; }
+        .warmup-level-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
         .reconnect-bar { margin-top: 15px; display: none; }
         .reconnect-bar .progress-track { background: #e0e0e0; border-radius: 20px; height: 10px; overflow: hidden; margin: 8px 0; }
         .reconnect-bar .progress-fill  { height: 100%; width: 0%; background: #25D366; border-radius: 20px; transition: width 0.4s ease; }
@@ -88,6 +93,21 @@
             <h2>Aquecimento de Chips</h2>
             <p>Selecione os Zaps que deseja aquecer (mínimo 2):</p>
             <div class="zap-list" id="warmupCheckboxes"></div>
+            <div class="warmup-level-row">
+                <label for="warmupLevel" style="font-weight:bold;">Nível de aquecimento:</label>
+                <select id="warmupLevel" class="level-select">
+                    <option value="1">1 — Muito lento (sem mídia)</option>
+                    <option value="2">2 — Lento (sem mídia)</option>
+                    <option value="3">3 — Leve (5% imagens)</option>
+                    <option value="4">4 — Moderado (10% imagens)</option>
+                    <option value="5" selected>5 — Normal (20% imagens)</option>
+                    <option value="6">6 — Ativo (25% img + 10% áudio)</option>
+                    <option value="7">7 — Intenso (30% img + 15% áudio)</option>
+                    <option value="8">8 — Agressivo (40% img + 20% áudio)</option>
+                    <option value="9">9 — Muito agressivo (50% img + 25% áudio)</option>
+                    <option value="10">10 — Máximo (60% img + 30% áudio)</option>
+                </select>
+            </div>
             <div class="warmup-controls">
                 <button id="btnStartWarmup" class="btn btn-warmup" style="flex: 2;" onclick="startWarmup()">🔥 Iniciar Aquecimento</button>
                 <button id="btnStopWarmup" class="btn btn-danger" style="flex: 1;" onclick="stopWarmup()" disabled>🛑 Parar</button>
@@ -157,9 +177,11 @@
         // ── Status dos Zaps ───────────────────────────────────
         async function refreshStatus() {
             try {
-                const res  = await fetch('/api/zaps-status');
-                const data = await res.json();
+                const res    = await fetch('/api/zaps-status');
+                const data   = await res.json();
+                const online = new Set(data.filter(z => z.state === 'open').map(z => z.accountId));
                 renderZapCards(data);
+                populateWarmupCheckboxes(online);
             } catch (err) {
                 console.error('Erro ao atualizar status:', err);
             }
@@ -289,14 +311,21 @@
         }
 
         // ── Aquecimento ───────────────────────────────────────
-        function populateWarmupCheckboxes() {
+        let _zapsOnlineSet = new Set();
+
+        function populateWarmupCheckboxes(onlineSet = new Set()) {
+            _zapsOnlineSet = onlineSet;
             const container = document.getElementById('warmupCheckboxes');
             container.innerHTML = '';
             for (let i = 1; i <= 24; i++) {
-                const id = `WA-${String(i).padStart(2, '0')}`;
-                const label = document.createElement('label');
-                label.style.cssText = 'display:flex;align-items:center;padding:10px;background:#fff;border:1px solid #ccc;border-radius:5px;cursor:pointer;';
-                label.innerHTML = `<input type="checkbox" class="warmup-cb" value="${id}" style="margin-right:10px;"> <span>${id}</span>`;
+                const id      = `WA-${String(i).padStart(2, '0')}`;
+                const online  = onlineSet.has(id);
+                const label   = document.createElement('label');
+                label.style.cssText = 'display:flex;align-items:center;padding:10px;background:#fff;border:1px solid #ccc;border-radius:5px;cursor:pointer;gap:6px;';
+                label.innerHTML = `
+                    <input type="checkbox" class="warmup-cb" value="${id}">
+                    <span class="warmup-dot ${online ? 'online' : 'offline'}"></span>
+                    <span>${id}</span>`;
                 container.appendChild(label);
             }
         }
@@ -305,6 +334,8 @@
             const selected = Array.from(document.querySelectorAll('.warmup-cb:checked')).map(cb => cb.value);
             if (selected.length < 2) { alert('Selecione pelo menos 2 Zaps.'); return; }
 
+            const level = parseInt(document.getElementById('warmupLevel').value);
+
             document.getElementById('btnStartWarmup').innerHTML = '⏳ Aquecendo...';
             document.getElementById('btnStartWarmup').disabled = true;
             document.getElementById('btnStopWarmup').disabled  = false;
@@ -312,25 +343,44 @@
             try {
                 const res  = await fetch('/api/warmup-chips/start', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ accounts: JSON.stringify(selected) }),
+                    body: JSON.stringify({ accounts: selected, level }),
                 });
                 const data = await res.json();
-                const box = document.getElementById('warmupResult');
+                const box  = document.getElementById('warmupResult');
                 box.style.display = 'block';
-                box.textContent = data.message || data.error;
+                box.textContent   = data.message || data.error;
             } catch (_) {
-                document.getElementById('btnStartWarmup').innerHTML = '🔥 Iniciar Aquecimento';
-                document.getElementById('btnStartWarmup').disabled = false;
-                document.getElementById('btnStopWarmup').disabled  = true;
+                setWarmupStopped();
             }
         }
 
         async function stopWarmup() {
             await fetch('/api/warmup-chips/stop', { method: 'POST' });
-            document.getElementById('warmupResult').textContent = 'Aquecimento parado.';
+            const box = document.getElementById('warmupResult');
+            box.style.display = 'block';
+            box.textContent   = '🛑 Aquecimento parado.';
+            setWarmupStopped();
+        }
+
+        function setWarmupStopped() {
             document.getElementById('btnStartWarmup').innerHTML = '🔥 Iniciar Aquecimento';
-            document.getElementById('btnStartWarmup').disabled = false;
-            document.getElementById('btnStopWarmup').disabled  = true;
+            document.getElementById('btnStartWarmup').disabled  = false;
+            document.getElementById('btnStopWarmup').disabled   = true;
+        }
+
+        async function checkWarmupStatus() {
+            try {
+                const res  = await fetch('/api/warmup-status');
+                const data = await res.json();
+                if (data.running) {
+                    document.getElementById('btnStartWarmup').innerHTML = '⏳ Aquecendo...';
+                    document.getElementById('btnStartWarmup').disabled  = true;
+                    document.getElementById('btnStopWarmup').disabled   = false;
+                    const box = document.getElementById('warmupResult');
+                    box.style.display = 'block';
+                    box.textContent   = '🔥 Aquecimento em andamento...';
+                }
+            } catch (_) {}
         }
 
         // ── Manutenção ────────────────────────────────────────
@@ -354,6 +404,7 @@
         // ── Init ──────────────────────────────────────────────
         populateWarmupCheckboxes();
         refreshStatus();
+        checkWarmupStatus();
         setInterval(refreshStatus, 10000);
     </script>
 </body>

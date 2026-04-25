@@ -7,15 +7,12 @@ import { humanDelay, processSpintax } from './antiSpam.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-const WARMUP_TEXT_PATH   = path.resolve(__dirname, '../../textAquecimento.txt');
-const WARMUP_IMAGES_DIR  = path.resolve(__dirname, '../../warmup_media/imagens');
-const WARMUP_AUDIOS_DIR  = path.resolve(__dirname, '../../warmup_media/audios');
-const MEDIA_HOST         = process.env.MEDIA_HOST || `http://host.docker.internal:${process.env.PORT || 3000}`;
+const WARMUP_TEXT_PATH  = path.resolve(__dirname, '../../textAquecimento.txt');
+const WARMUP_IMAGES_DIR = path.resolve(__dirname, '../../warmup_media/imagens');
+const WARMUP_AUDIOS_DIR = path.resolve(__dirname, '../../warmup_media/audios');
+const MEDIA_HOST        = process.env.MEDIA_HOST || `http://host.docker.internal:${process.env.PORT || 3000}`;
 
 // ── Configuração por nível ────────────────────────────────────────────────────
-// groupSize: quantos zaps por grupo de conversa
-// minDelayS / maxDelayS: delay entre cada fala (segundos)
-// imageChance / audioChance: probabilidade de enviar mídia (0–1)
 const LEVEL_CONFIG = {
     1:  { groupSize: 2, minDelayS: 180, maxDelayS: 300, imageChance: 0.00, audioChance: 0.00 },
     2:  { groupSize: 2, minDelayS: 120, maxDelayS: 180, imageChance: 0.00, audioChance: 0.00 },
@@ -29,9 +26,14 @@ const LEVEL_CONFIG = {
     10: { groupSize: 8, minDelayS:   8, maxDelayS:  12, imageChance: 0.60, audioChance: 0.30 },
 };
 
-let isWarmupRunning = false;
+// Flag separado por modo: manual (startWarmup) e orquestrador (runWarmupFor) são independentes.
+// Antes era um único isWarmupRunning compartilhado — stopWarmup() da UI interrompia
+// o runWarmupFor() do orquestrador, e o flag false impedia runGroupConversation de rodar.
+let _manualRunning = false;
 
-// ── Cache de recursos (carregados uma única vez por sessão) ───────────────────
+export const isWarmupRunning = () => _manualRunning;
+
+// ── Cache de recursos ─────────────────────────────────────────────────────────
 const _cache = { texts: null, images: null, audios: null };
 
 const loadTexts = () => {
@@ -56,13 +58,10 @@ const loadTexts = () => {
     return _cache.texts;
 };
 
-// Lê o diretório uma única vez e reutiliza — evita readdirSync em cada mensagem.
 const readDir = (dir) => {
     try {
         if (!fs.existsSync(dir)) return [];
-        return fs.readdirSync(dir)
-            .filter(f => !f.startsWith('.'))
-            .map(f => path.join(dir, f));
+        return fs.readdirSync(dir).filter(f => !f.startsWith('.')).map(f => path.join(dir, f));
     } catch (_) { return []; }
 };
 
@@ -71,21 +70,17 @@ const getAudios = () => { _cache.audios ??= readDir(WARMUP_AUDIOS_DIR); return _
 
 const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// Converte caminho local em URL para a Evolution API
 const toMediaUrl = (filePath) => {
     const rel = path.relative(path.resolve(__dirname, '../../'), filePath).replace(/\\/g, '/');
     return `${MEDIA_HOST}/${rel}`;
 };
 
-// ── Verificação de instância ──────────────────────────────────────────────────
+// ── Verificação de instâncias ─────────────────────────────────────────────────
 const isReady = async (accountId) => {
-    try {
-        return (await evolution.getConnectionState(accountId)) === 'open';
-    } catch (_) { return false; }
+    try { return (await evolution.getConnectionState(accountId)) === 'open'; }
+    catch (_) { return false; }
 };
 
-// Cache de donos por accountId: evita chamar fetchInstances() N vezes por grupo.
-// Uma única chamada popula todos — os demais são lookups instantâneos no Map.
 const _ownerCache = new Map();
 
 const getOwnerNumber = async (accountId) => {
@@ -101,11 +96,10 @@ const getOwnerNumber = async (accountId) => {
     } catch (_) { return null; }
 };
 
-// ── Envio com mídia aleatória ────────────────────────────────────────────────
+// ── Envio de mensagem de aquecimento ─────────────────────────────────────────
 const sendWarmupMessage = async (fromId, toNumber, level) => {
-    const cfg    = LEVEL_CONFIG[level] || LEVEL_CONFIG[5];
-    const texts  = loadTexts();
-    const text   = processSpintax(pickRandom(texts));
+    const cfg  = LEVEL_CONFIG[level] || LEVEL_CONFIG[5];
+    const text = processSpintax(pickRandom(loadTexts()));
     const images = getImages();
     const audios = getAudios();
 
@@ -128,19 +122,18 @@ const sendWarmupMessage = async (fromId, toNumber, level) => {
 
 // ── Conversa em grupo ─────────────────────────────────────────────────────────
 /**
- * Executa uma rodada de conversa em um grupo.
- * Para pares: A→B, delay, B→A
- * Para triângulos (3): A→B, delay, B→A, delay, B→C, delay, C→B
- * Para grupos maiores: chain circular A→B→C→D→A
+ * Executa uma rodada de conversa em grupo.
+ * @param {string[]} group - IDs dos zaps participantes
+ * @param {number}   level - nível de aquecimento
+ * @param {()=>boolean} shouldContinue - callback que indica se deve continuar
+ *        Separa o controle de parada do manual (flag) vs. orquestrador (tempo).
  */
-const runGroupConversation = async (group, level) => {
-    const cfg = LEVEL_CONFIG[level] || LEVEL_CONFIG[5];
-
-    // Resolve números de telefone de cada membro (necessário para enviar)
+const runGroupConversation = async (group, level, shouldContinue) => {
+    const cfg     = LEVEL_CONFIG[level] || LEVEL_CONFIG[5];
     const numbers = await Promise.all(group.map(id => getOwnerNumber(id)));
 
     for (let i = 0; i < group.length; i++) {
-        if (!isWarmupRunning) return;
+        if (!shouldContinue()) return;
 
         const fromId = group[i];
         const toIdx  = (i + 1) % group.length;
@@ -151,8 +144,7 @@ const runGroupConversation = async (group, level) => {
         await sendWarmupMessage(fromId, toNum, level);
         await humanDelay(cfg.minDelayS, cfg.maxDelayS);
 
-        // Resposta de volta (só para pares e triângulos, evita spam em grupos grandes)
-        if (group.length <= 3 && isWarmupRunning) {
+        if (group.length <= 3 && shouldContinue()) {
             const replyFrom = group[toIdx];
             const replyTo   = numbers[i];
             if (replyTo) {
@@ -163,7 +155,7 @@ const runGroupConversation = async (group, level) => {
     }
 };
 
-// ── Filtros de contas ativas ──────────────────────────────────────────────────
+// ── Utilitários ───────────────────────────────────────────────────────────────
 const filterReady = async (accounts) => {
     const checks = await Promise.all(accounts.map(async id => ({ id, ok: await isReady(id) })));
     return checks.filter(c => {
@@ -172,17 +164,28 @@ const filterReady = async (accounts) => {
     }).map(c => c.id);
 };
 
+const buildGroups = (accounts, groupSize) => {
+    const shuffled = [...accounts].sort(() => 0.5 - Math.random());
+    const groups   = [];
+    for (let i = 0; i < shuffled.length; i += groupSize) {
+        const g = shuffled.slice(i, i + groupSize);
+        if (g.length >= 2) groups.push(g);
+    }
+    return groups;
+};
+
 // ── API pública ───────────────────────────────────────────────────────────────
 
 /**
- * Roda uma sessão de aquecimento por exatamente `durationSeconds`.
- * Usado pelo orquestrador durante as pausas do wave dispatch.
+ * Aquecimento por tempo determinado — usado pelo orquestrador entre ondas.
+ * Completamente independente do flag manual: stopWarmup() não o afeta.
  */
 export const runWarmupFor = async (activeAccounts, level = 5, durationSeconds = 300) => {
-    const cfg     = LEVEL_CONFIG[level] || LEVEL_CONFIG[5];
-    const endTime = Date.now() + durationSeconds * 1000;
-    let ready     = await filterReady(activeAccounts);
+    const cfg       = LEVEL_CONFIG[level] || LEVEL_CONFIG[5];
+    const endTime   = Date.now() + durationSeconds * 1000;
+    const shouldContinue = () => Date.now() < endTime;
 
+    let ready = await filterReady(activeAccounts);
     if (ready.length < 2) {
         console.log('[AQUECIMENTO] Menos de 2 zaps disponíveis. Pausa sem aquecimento.');
         await new Promise(r => setTimeout(r, durationSeconds * 1000));
@@ -191,61 +194,56 @@ export const runWarmupFor = async (activeAccounts, level = 5, durationSeconds = 
 
     console.log(`🔥 [AQUECIMENTO] Sessão de ${Math.round(durationSeconds / 60)}min — nível ${level} — ${ready.length} zaps`);
 
-    while (Date.now() < endTime) {
-        // Re-filtra a cada rodada para remover zaps que caíram
+    while (shouldContinue()) {
         ready = await filterReady(ready);
         if (ready.length < 2) break;
 
-        // Divide em grupos e roda todos em paralelo
-        const shuffled = [...ready].sort(() => 0.5 - Math.random());
-        const groups   = [];
-        for (let i = 0; i < shuffled.length; i += cfg.groupSize) {
-            const g = shuffled.slice(i, i + cfg.groupSize);
-            if (g.length >= 2) groups.push(g);
-        }
+        const groups = buildGroups(ready, cfg.groupSize);
+        console.log(`🔥 [AQUECIMENTO] ${groups.length} grupo(s) — ${Math.round((endTime - Date.now()) / 1000)}s restantes`);
 
-        console.log(`🔥 [AQUECIMENTO] ${groups.length} grupo(s) de até ${cfg.groupSize} — ${Math.round((endTime - Date.now()) / 1000)}s restantes`);
-        await Promise.allSettled(groups.map(g => runGroupConversation(g, level)));
+        await Promise.allSettled(groups.map(g => runGroupConversation(g, level, shouldContinue)));
 
-        if (Date.now() >= endTime) break;
-        await humanDelay(15, 30);
+        if (shouldContinue()) await humanDelay(15, 30);
     }
 
     console.log('✅ [AQUECIMENTO] Sessão encerrada.');
 };
 
 /**
- * Aquecimento contínuo (iniciado manualmente pela página de Zaps).
+ * Aquecimento contínuo — iniciado manualmente pela página de Zaps.
+ * Controlado por _manualRunning; stopWarmup() encerra apenas este modo.
  */
 export const startWarmup = async (accountsList, level = 5) => {
+    if (_manualRunning) {
+        console.warn('⚠️ [AQUECIMENTO] Já está rodando. Ignorando nova chamada.');
+        return;
+    }
+
     let active = await filterReady(accountsList);
     if (active.length < 2) {
         console.warn('⚠️ [AQUECIMENTO] Menos de 2 contas conectadas. Abortando.');
         return;
     }
 
-    isWarmupRunning = true;
+    _manualRunning = true;
+    const shouldContinue = () => _manualRunning;
     console.log(`\n🔥 [AQUECIMENTO] Contínuo iniciado — ${active.length} zaps, nível ${level}`);
 
-    while (isWarmupRunning) {
+    while (_manualRunning) {
         active = await filterReady(active);
-        if (active.length < 2) { isWarmupRunning = false; break; }
+        if (active.length < 2) { _manualRunning = false; break; }
 
-        const cfg      = LEVEL_CONFIG[level] || LEVEL_CONFIG[5];
-        const shuffled = [...active].sort(() => 0.5 - Math.random());
-        const groups   = [];
-        for (let i = 0; i < shuffled.length; i += cfg.groupSize) {
-            const g = shuffled.slice(i, i + cfg.groupSize);
-            if (g.length >= 2) groups.push(g);
-        }
+        const cfg    = LEVEL_CONFIG[level] || LEVEL_CONFIG[5];
+        const groups = buildGroups(active, cfg.groupSize);
 
-        await Promise.allSettled(groups.map(g => runGroupConversation(g, level)));
-        await humanDelay(15, 30);
+        await Promise.allSettled(groups.map(g => runGroupConversation(g, level, shouldContinue)));
+        if (_manualRunning) await humanDelay(15, 30);
     }
 
+    _manualRunning = false;
     console.log('🛑 [AQUECIMENTO] Contínuo parado.');
 };
 
-export const stopWarmup = () => { isWarmupRunning = false; };
+export const stopWarmup = () => { _manualRunning = false; };
 
-export default { startWarmup, stopWarmup, runWarmupFor };
+export default { startWarmup, stopWarmup, runWarmupFor, isWarmupRunning };
