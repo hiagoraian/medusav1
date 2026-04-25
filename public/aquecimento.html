@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aquecimento — Medusa</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030; }
+        .container { max-width: 960px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+        h1 { color: #e65100; border-bottom: 2px solid #ff6f00; padding-bottom: 10px; margin-top: 0; }
+        h2 { color: #075e54; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; margin-top: 0; }
+        .section { margin-bottom: 20px; padding: 20px; background: #f9f9f9; border-radius: 8px; border: 1px solid #ddd; }
+        .btn { background-color: #25D366; color: white; border: none; padding: 12px 24px; font-size: 15px; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .btn:hover { background-color: #128C7E; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-warmup { background-color: #ff6f00; }
+        .btn-warmup:hover { background-color: #e65100; }
+        .btn-danger { background-color: #d32f2f; }
+        .btn-danger:hover { background-color: #b71c1c; }
+        .btn-secondary { background-color: #34b7f1; }
+        .btn-sm { padding: 7px 14px; font-size: 12px; }
+        .nav { display: flex; gap: 10px; margin-bottom: 20px; }
+        .nav a { padding: 10px 20px; background: #f0f0f0; border-radius: 5px; text-decoration: none; color: #075e54; font-weight: bold; }
+        .nav a:hover { background: #e0e0e0; }
+        /* Status banner */
+        .status-banner { display: none; background: #fff3e0; border: 1px solid #ff6f00; border-left: 5px solid #ff6f00; border-radius: 6px; padding: 14px 18px; margin-bottom: 20px; }
+        .status-banner.active { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+        .status-banner .pulse { width: 12px; height: 12px; border-radius: 50%; background: #ff6f00; animation: pulse 1.2s infinite; flex-shrink: 0; }
+        @keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.5; transform:scale(1.3); } }
+        .status-banner .info { flex: 1; font-size: 14px; }
+        .status-banner .info strong { font-size: 16px; color: #e65100; }
+        /* Zap grid */
+        .zap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-top: 14px; }
+        .zap-item { display: flex; align-items: center; gap: 8px; padding: 9px 10px; background: #fff; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; font-size: 13px; transition: border-color 0.2s; }
+        .zap-item:hover { border-color: #ff6f00; }
+        .zap-item.selected { border-color: #ff6f00; background: #fff8f0; }
+        .zap-item input[type=checkbox] { flex-shrink: 0; accent-color: #ff6f00; }
+        .zap-item .name { font-weight: bold; flex: 1; }
+        .zap-item .tag { font-size: 10px; color: #888; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
+        .status-dot.online  { background: #25D366; }
+        .status-dot.offline { background: #d32f2f; }
+        /* Selector buttons */
+        .sel-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+        /* Config row */
+        .config-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 4px; }
+        .config-group { flex: 1; min-width: 180px; }
+        .config-group label { display: block; font-weight: bold; font-size: 13px; margin-bottom: 5px; }
+        .config-group select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
+        /* Level info */
+        .level-info { background: #fff3e0; border-radius: 6px; padding: 10px 14px; margin-top: 10px; font-size: 13px; color: #bf360c; line-height: 1.6; }
+        /* Action buttons */
+        .action-row { display: flex; gap: 12px; margin-top: 6px; }
+        .action-row .btn { flex: 1; padding: 14px; font-size: 16px; }
+        /* Selection summary */
+        .sel-summary { font-size: 13px; color: #555; margin-top: 8px; }
+        .sel-summary strong { color: #e65100; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🔥 Aquecimento de Chips</h1>
+
+    <div class="nav">
+        <a href="index.html">← Painel</a>
+        <a href="zaps.html">🔌 Gestão de Zaps</a>
+    </div>
+
+    <!-- Status banner (visível só quando rodando) -->
+    <div class="status-banner" id="statusBanner">
+        <div class="pulse"></div>
+        <div class="info">
+            <strong>Aquecimento em andamento</strong><br>
+            <span id="statusDetail">Carregando...</span>
+        </div>
+    </div>
+
+    <!-- 1. Seleção de Zaps -->
+    <div class="section">
+        <h2>1. Seleção de Zaps</h2>
+
+        <div class="sel-buttons">
+            <button class="btn btn-sm" style="background:#1565c0;" onclick="selectGroup('A')">Grupo A</button>
+            <button class="btn btn-sm" style="background:#6a1b9a;" onclick="selectGroup('B')">Grupo B</button>
+            <button class="btn btn-sm" style="background:#e65100;" onclick="selectGroup('C')">Grupo C</button>
+            <button class="btn btn-sm btn-secondary"               onclick="selectGroup('all')">Todos</button>
+            <button class="btn btn-sm" style="background:#aaa;"    onclick="selectGroup('none')">Limpar</button>
+        </div>
+
+        <div class="zap-grid" id="zapGrid"></div>
+        <div class="sel-summary" id="selSummary">Nenhum zap selecionado.</div>
+    </div>
+
+    <!-- 2. Configuração -->
+    <div class="section">
+        <h2>2. Configuração</h2>
+        <div class="config-row">
+            <div class="config-group">
+                <label>🔥 Nível de Aquecimento</label>
+                <select id="warmupLevel" onchange="updateLevelInfo()">
+                    <option value="1">Nível 1 — Muito lento · sem mídia · 3–5 min/msg</option>
+                    <option value="2">Nível 2 — Lento · sem mídia · 2–3 min/msg</option>
+                    <option value="3">Nível 3 — Leve · 5% imagens · 90–120s</option>
+                    <option value="4">Nível 4 — Moderado · 10% imagens · 60–90s</option>
+                    <option value="5" selected>Nível 5 — Normal · 20% imagens · 45–60s</option>
+                    <option value="6">Nível 6 — Ativo · 25% img + 10% áudio · 30–45s</option>
+                    <option value="7">Nível 7 — Intenso · 30% img + 15% áudio · 20–30s</option>
+                    <option value="8">Nível 8 — Agressivo · 40% img + 20% áudio · 15–20s</option>
+                    <option value="9">Nível 9 — Muito agressivo · 50% img + 25% áudio · 10–15s</option>
+                    <option value="10">Nível 10 — Máximo · 60% img + 30% áudio · 8–12s</option>
+                </select>
+            </div>
+            <div class="config-group">
+                <label>✈️ Rotação de IP (modo avião)</label>
+                <select id="rotateMins">
+                    <option value="0">Desativada</option>
+                    <option value="30">A cada 30 minutos</option>
+                    <option value="60" selected>A cada 60 minutos</option>
+                    <option value="90">A cada 90 minutos</option>
+                    <option value="120">A cada 120 minutos</option>
+                    <option value="180">A cada 3 horas</option>
+                </select>
+            </div>
+        </div>
+        <div class="level-info" id="levelInfo"></div>
+    </div>
+
+    <!-- 3. Ações -->
+    <div class="action-row">
+        <button class="btn btn-warmup" id="btnStart" onclick="startWarmup()">🔥 Iniciar Aquecimento</button>
+        <button class="btn btn-danger" id="btnStop"  onclick="stopWarmup()" disabled>🛑 Parar</button>
+    </div>
+</div>
+
+<script>
+    // ── Configuração de níveis ───────────────────────────────────────────────
+    const LEVEL_CFG = {
+        1:  { groupSize: 2, minDelayS: 180, imageChance: 0.00, audioChance: 0.00 },
+        2:  { groupSize: 2, minDelayS: 120, imageChance: 0.00, audioChance: 0.00 },
+        3:  { groupSize: 3, minDelayS:  90, imageChance: 0.05, audioChance: 0.00 },
+        4:  { groupSize: 3, minDelayS:  60, imageChance: 0.10, audioChance: 0.00 },
+        5:  { groupSize: 4, minDelayS:  45, imageChance: 0.20, audioChance: 0.00 },
+        6:  { groupSize: 4, minDelayS:  30, imageChance: 0.25, audioChance: 0.10 },
+        7:  { groupSize: 4, minDelayS:  20, imageChance: 0.30, audioChance: 0.15 },
+        8:  { groupSize: 6, minDelayS:  15, imageChance: 0.40, audioChance: 0.20 },
+        9:  { groupSize: 6, minDelayS:  10, imageChance: 0.50, audioChance: 0.25 },
+        10: { groupSize: 8, minDelayS:   8, imageChance: 0.60, audioChance: 0.30 },
+    };
+
+    let _onlineSet = new Set();
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function getZapGroup(i) {
+        const pos = (i - 1) % 12;
+        if (pos < 4) return 'A';
+        if (pos < 8) return 'B';
+        return 'C';
+    }
+    function getZapZte(i) { return Math.ceil(i / 12); }
+
+    // ── Montar grid de zaps ──────────────────────────────────────────────────
+    function buildZapGrid(onlineSet = new Set()) {
+        _onlineSet = onlineSet;
+        const grid = document.getElementById('zapGrid');
+        // Preserva checkboxes marcados antes de recriar
+        const checked = new Set(
+            Array.from(grid.querySelectorAll('input:checked')).map(cb => cb.value)
+        );
+        grid.innerHTML = '';
+        for (let i = 1; i <= 48; i++) {
+            const id      = `WA-${String(i).padStart(2, '0')}`;
+            const online  = onlineSet.has(id);
+            const group   = getZapGroup(i);
+            const zte     = getZapZte(i);
+            const isChk   = checked.has(id);
+
+            const div = document.createElement('div');
+            div.className = 'zap-item' + (isChk ? ' selected' : '');
+            div.innerHTML = `
+                <input type="checkbox" class="warmup-cb" value="${id}" ${isChk ? 'checked' : ''}>
+                <span class="status-dot ${online ? 'online' : 'offline'}"></span>
+                <span class="name">${id}</span>
+                <span class="tag">ZTE${zte}-${group}</span>`;
+            div.querySelector('input').addEventListener('change', e => {
+                div.classList.toggle('selected', e.target.checked);
+                updateSelSummary();
+            });
+            grid.appendChild(div);
+        }
+        updateSelSummary();
+    }
+
+    function selectGroup(filter) {
+        document.querySelectorAll('.warmup-cb').forEach((cb, idx) => {
+            const i     = idx + 1;
+            const group = getZapGroup(i);
+            const prev  = cb.checked;
+            cb.checked  = filter === 'all' ? true
+                        : filter === 'none' ? false
+                        : group === filter;
+            if (cb.checked !== prev) cb.dispatchEvent(new Event('change'));
+        });
+    }
+
+    function updateSelSummary() {
+        const all      = document.querySelectorAll('.warmup-cb');
+        const checked  = document.querySelectorAll('.warmup-cb:checked');
+        const online   = Array.from(checked).filter(cb => _onlineSet.has(cb.value)).length;
+        const el       = document.getElementById('selSummary');
+        if (!checked.length) {
+            el.innerHTML = 'Nenhum zap selecionado.';
+        } else {
+            el.innerHTML = `<strong>${checked.length}</strong> de ${all.length} zaps selecionados · <strong style="color:#25D366">${online} ativos</strong> · ${checked.length - online} inativos`;
+        }
+    }
+
+    // ── Level info ───────────────────────────────────────────────────────────
+    function updateLevelInfo() {
+        const level    = parseInt(document.getElementById('warmupLevel').value);
+        const cfg      = LEVEL_CFG[level];
+        const rotate   = parseInt(document.getElementById('rotateMins').value);
+        const selected = document.querySelectorAll('.warmup-cb:checked').length;
+        const groups   = selected > 0 ? Math.floor(selected / cfg.groupSize) : '?';
+
+        let text = `Grupos de <strong>${cfg.groupSize} zaps</strong> · delay <strong>${cfg.minDelayS}s+</strong> · imagens: <strong>${Math.round(cfg.imageChance * 100)}%</strong> · áudio: <strong>${Math.round(cfg.audioChance * 100)}%</strong>`;
+        if (selected) text += ` · ~<strong>${groups}</strong> conversa(s) paralela(s)`;
+        if (rotate > 0) text += ` · <strong>✈️ modo avião a cada ${rotate} min</strong> (novo IP para todos os ZTEs)`;
+
+        document.getElementById('levelInfo').innerHTML = text;
+    }
+
+    document.getElementById('warmupLevel').addEventListener('change', updateLevelInfo);
+    document.getElementById('rotateMins').addEventListener('change',  updateLevelInfo);
+
+    // ── Status (polling) ─────────────────────────────────────────────────────
+    async function checkStatus() {
+        try {
+            const data = await (await fetch('/api/warmup-status')).json();
+            const banner = document.getElementById('statusBanner');
+
+            if (data.running) {
+                banner.classList.add('active');
+                const mins = data.startedAt
+                    ? Math.floor((Date.now() - data.startedAt) / 60000)
+                    : 0;
+                const rotateStr = data.rotateMins > 0 ? ` · ✈️ rotação a cada ${data.rotateMins} min` : '';
+                document.getElementById('statusDetail').textContent =
+                    `Nível ${data.level} · ${data.zapCount} zap(s) em aquecimento · ${mins} min rodando${rotateStr}`;
+                setRunningUI(true);
+            } else {
+                banner.classList.remove('active');
+                setRunningUI(false);
+            }
+        } catch (_) {}
+    }
+
+    function setRunningUI(running) {
+        document.getElementById('btnStart').disabled = running;
+        document.getElementById('btnStop').disabled  = !running;
+        document.getElementById('btnStart').textContent = running ? '⏳ Aquecendo...' : '🔥 Iniciar Aquecimento';
+    }
+
+    // ── Zap status ───────────────────────────────────────────────────────────
+    async function refreshZapStatus() {
+        try {
+            const data   = await (await fetch('/api/zaps-status')).json();
+            const online = new Set(data.filter(z => z.state === 'open').map(z => z.accountId));
+            buildZapGrid(online);
+        } catch (_) {}
+    }
+
+    // ── Iniciar / Parar ──────────────────────────────────────────────────────
+    async function startWarmup() {
+        const selected = Array.from(document.querySelectorAll('.warmup-cb:checked')).map(cb => cb.value);
+        if (selected.length < 2) return alert('Selecione pelo menos 2 Zaps.');
+
+        const level      = parseInt(document.getElementById('warmupLevel').value);
+        const rotateMins = parseInt(document.getElementById('rotateMins').value);
+
+        setRunningUI(true);
+
+        try {
+            const res  = await fetch('/api/warmup-chips/start', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ accounts: selected, level, rotateMins }),
+            });
+            const data = await res.json();
+            if (data.error) {
+                alert('❌ ' + data.error);
+                setRunningUI(false);
+            } else {
+                document.getElementById('statusBanner').classList.add('active');
+                await checkStatus();
+            }
+        } catch (_) {
+            alert('Erro ao conectar com o servidor.');
+            setRunningUI(false);
+        }
+    }
+
+    async function stopWarmup() {
+        await fetch('/api/warmup-chips/stop', { method: 'POST' });
+        setRunningUI(false);
+        document.getElementById('statusBanner').classList.remove('active');
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+    buildZapGrid();
+    refreshZapStatus();
+    checkStatus();
+    updateLevelInfo();
+    setInterval(refreshZapStatus, 10_000);
+    setInterval(checkStatus,       5_000);
+</script>
+</body>
+</html>

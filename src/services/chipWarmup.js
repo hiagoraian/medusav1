@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as evolution from '../evolution/client.js';
 import { humanDelay, processSpintax } from './antiSpam.js';
+import { rotateMobileIPsStaggered, getActiveZteIds } from './networkController.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -26,12 +27,12 @@ const LEVEL_CONFIG = {
     10: { groupSize: 8, minDelayS:   8, maxDelayS:  12, imageChance: 0.60, audioChance: 0.30 },
 };
 
-// Flag separado por modo: manual (startWarmup) e orquestrador (runWarmupFor) são independentes.
-// Antes era um único isWarmupRunning compartilhado — stopWarmup() da UI interrompia
-// o runWarmupFor() do orquestrador, e o flag false impedia runGroupConversation de rodar.
+// Estado do aquecimento manual — exposto para a UI via /api/warmup-status
 let _manualRunning = false;
+let _warmupState   = { running: false, level: 0, zapCount: 0, rotateMins: 0, startedAt: null };
 
 export const isWarmupRunning = () => _manualRunning;
+export const getWarmupState  = () => ({ ..._warmupState });
 
 // ── Cache de recursos ─────────────────────────────────────────────────────────
 const _cache = { texts: null, images: null, audios: null };
@@ -210,10 +211,14 @@ export const runWarmupFor = async (activeAccounts, level = 5, durationSeconds = 
 };
 
 /**
- * Aquecimento contínuo — iniciado manualmente pela página de Zaps.
+ * Aquecimento contínuo — iniciado manualmente pela página de Aquecimento.
  * Controlado por _manualRunning; stopWarmup() encerra apenas este modo.
+ *
+ * @param {string[]} accountsList - zaps selecionados
+ * @param {number}   level        - nível 1–10
+ * @param {number}   rotateMins   - intervalo em minutos para rotação de IP (0 = desativado)
  */
-export const startWarmup = async (accountsList, level = 5) => {
+export const startWarmup = async (accountsList, level = 5, rotateMins = 0) => {
     if (_manualRunning) {
         console.warn('⚠️ [AQUECIMENTO] Já está rodando. Ignorando nova chamada.');
         return;
@@ -226,12 +231,28 @@ export const startWarmup = async (accountsList, level = 5) => {
     }
 
     _manualRunning = true;
-    const shouldContinue = () => _manualRunning;
-    console.log(`\n🔥 [AQUECIMENTO] Contínuo iniciado — ${active.length} zaps, nível ${level}`);
+    _warmupState   = { running: true, level, zapCount: active.length, rotateMins, startedAt: Date.now() };
+
+    const shouldContinue  = () => _manualRunning;
+    const rotateIntervalMs = rotateMins > 0 ? rotateMins * 60_000 : 0;
+    let   nextRotateAt     = rotateIntervalMs > 0 ? Date.now() + rotateIntervalMs : Infinity;
+
+    console.log(`\n🔥 [AQUECIMENTO] Iniciado — ${active.length} zaps | nível ${level}${rotateMins > 0 ? ` | rotação a cada ${rotateMins} min` : ''}`);
 
     while (_manualRunning) {
+        // ── Rotação de IP agendada ────────────────────────────────────────────
+        if (Date.now() >= nextRotateAt) {
+            console.log('🔄 [AQUECIMENTO] Rotacionando IPs (escalonado)...');
+            await rotateMobileIPsStaggered(getActiveZteIds());
+            nextRotateAt = Date.now() + rotateIntervalMs;
+            // Reavalia quem está online após a reconexão 4G
+            active = await filterReady(accountsList);
+        }
+
         active = await filterReady(active);
         if (active.length < 2) { _manualRunning = false; break; }
+
+        _warmupState.zapCount = active.length;
 
         const cfg    = LEVEL_CONFIG[level] || LEVEL_CONFIG[5];
         const groups = buildGroups(active, cfg.groupSize);
@@ -241,9 +262,10 @@ export const startWarmup = async (accountsList, level = 5) => {
     }
 
     _manualRunning = false;
+    _warmupState   = { running: false, level: 0, zapCount: 0, rotateMins: 0, startedAt: null };
     console.log('🛑 [AQUECIMENTO] Contínuo parado.');
 };
 
 export const stopWarmup = () => { _manualRunning = false; };
 
-export default { startWarmup, stopWarmup, runWarmupFor, isWarmupRunning };
+export default { startWarmup, stopWarmup, runWarmupFor, isWarmupRunning, getWarmupState };

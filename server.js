@@ -12,7 +12,7 @@ import {
     getDashboardStats, clearQueue, resetCampaign, getInterruptedCycle,
 } from './src/services/queueService.js';
 import { runCampaignLoop, requestStop }            from './src/services/orchestrator.js';
-import { startWarmup, stopWarmup, isWarmupRunning } from './src/services/chipWarmup.js';
+import { startWarmup, stopWarmup, isWarmupRunning, getWarmupState } from './src/services/chipWarmup.js';
 import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount } from './src/services/networkController.js';
 import { generateCampaignReport }                  from './src/services/reportGenerator.js';
 import * as evolution                              from './src/evolution/client.js';
@@ -395,17 +395,17 @@ app.post('/api/test-send', uploadMedia.single('mediaFile'), async (req, res) => 
 
 // ── Aquecimento manual ────────────────────────────────────────────────────────
 
-app.get('/api/warmup-status', (req, res) => {
-    res.json({ running: isWarmupRunning() });
+app.get('/api/warmup-status', (_req, res) => {
+    res.json(getWarmupState());
 });
 
 app.post('/api/warmup-chips/start', async (req, res) => {
     try {
-        const { accounts, level = 5 } = req.body;
+        const { accounts, level = 5, rotateMins = 0 } = req.body;
         if (!Array.isArray(accounts) || accounts.length < 2)
             return res.status(400).json({ error: 'Mínimo 2 contas.' });
         res.json({ message: `🔥 Aquecimento nível ${level} iniciado!` });
-        startWarmup(accounts, parseInt(level));
+        startWarmup(accounts, parseInt(level), parseInt(rotateMins));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
