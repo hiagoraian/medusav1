@@ -133,8 +133,9 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
     await waitUntilStartDatetime(startDatetime);
     if (stopRequested) { resetStop(); return; }
 
-    let groupIdx  = 0;
-    let waveCount = 0;
+    let groupIdx         = 0;
+    let waveCount        = 0;
+    let consecutiveSkips = 0;
 
     console.log(`\n🚀 [ORCH] Campanha iniciada`);
     console.log(`   Zaps: ${activeAccounts.length} | Nível: ${dispatchLevel} | Aquecimento: ${warmupLevel}`);
@@ -164,9 +165,15 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
 
         if (groupZaps.length === 0) {
             console.warn(`⚠️ [ORCH] Grupo ${groupLetter} sem zaps ativos. Avançando para próximo grupo.`);
+            consecutiveSkips++;
+            if (consecutiveSkips >= 3) {
+                console.error('🔴 [ORCH] Nenhum grupo com zaps ativos. Encerrando campanha.');
+                break;
+            }
             groupIdx++;
             continue;
         }
+        consecutiveSkips = 0;
 
         // Bloco termina no menor entre: fim do bloco, fim da janela hoje, fim da campanha
         const blockEnd = new Date(Math.min(
@@ -192,6 +199,7 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
 
             console.log(`  🌊 Onda ${waveCount} [Grupo ${groupLetter}] — ${batch.length} msgs — ${groupZaps.length} zap(s) — ${numSubs} sub-grupo(s)`);
 
+            const waveStartMs = Date.now();
             await publishBulk(batch, groupZaps);
             await startWorkers(groupZaps, {
                 ...config,
@@ -205,12 +213,30 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
 
             if (stopRequested) break;
 
-            // Aquecimento dos grupos inativos enquanto espera próxima onda
-            const timeLeft  = blockEnd.getTime() - Date.now();
-            const warmupSec = Math.min(WARMUP_PAUSE_S, Math.floor(timeLeft / 1000) - 60);
-            if (warmupSec > 30 && otherZaps.length >= 2) {
-                console.log(`  🔥 Aquecimento grupos inativos (${warmupSec}s)...`);
-                await runWarmupFor(otherZaps, warmupLevel, warmupSec);
+            // ── Pacing: distribui ondas pelo tempo restante da campanha ──────────
+            const waveDurMs  = Date.now() - waveStartMs;
+            const remaining  = await countPending();
+            if (remaining === 0) break;
+
+            let pauseSec = WARMUP_PAUSE_S;
+            if (campaignEnd) {
+                const timeLeftMs   = campaignEnd.getTime() - Date.now();
+                const wavesLeft    = Math.max(1, Math.ceil(remaining / batch.length));
+                const idealPauseMs = Math.max(0, (timeLeftMs / wavesLeft) - waveDurMs);
+                pauseSec = Math.max(30, Math.floor(idealPauseMs / 1000));
+                console.log(`  ⏱️  Pacing: ${remaining} restantes, ~${wavesLeft} ondas, pausa ideal ${Math.round(idealPauseMs / 1000)}s`);
+            }
+
+            // Cap: não ultrapassa o fim do bloco (deixa 60 s de margem)
+            const timeLeft = blockEnd.getTime() - Date.now();
+            pauseSec = Math.min(pauseSec, Math.max(0, Math.floor(timeLeft / 1000) - 60));
+
+            if (pauseSec > 30 && otherZaps.length >= 2) {
+                console.log(`  🔥 Aquecimento grupos inativos (${pauseSec}s)...`);
+                await runWarmupFor(otherZaps, warmupLevel, pauseSec);
+            } else if (pauseSec > 5) {
+                console.log(`  ⏳ Pausa entre ondas (${pauseSec}s)...`);
+                await new Promise(r => setTimeout(r, pauseSec * 1_000));
             }
         }
 

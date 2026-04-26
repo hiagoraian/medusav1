@@ -77,7 +77,6 @@
 
         <div class="nav">
             <a href="index.html">← Painel</a>
-            <a href="aquecimento.html">🔥 Aquecimento</a>
         </div>
 
         <div class="section">
@@ -99,21 +98,21 @@
             <h2>Aquecimento de Chips</h2>
             <p>Selecione os Zaps que deseja aquecer (mínimo 2):</p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectGroup('A')">Selecionar Grupo A</button>
-                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectGroup('B')">Selecionar Grupo B</button>
-                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectGroup('C')">Selecionar Grupo C</button>
-                <button class="btn" style="padding:6px 12px;font-size:12px;background:#555;" onclick="selectGroup('all')">Todos</button>
-                <button class="btn" style="padding:6px 12px;font-size:12px;background:#999;" onclick="selectGroup('none')">Limpar</button>
+                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectWarmupGroup('A')">Selecionar Grupo A</button>
+                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectWarmupGroup('B')">Selecionar Grupo B</button>
+                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectWarmupGroup('C')">Selecionar Grupo C</button>
+                <button class="btn" style="padding:6px 12px;font-size:12px;background:#555;" onclick="selectWarmupGroup('all')">Todos</button>
+                <button class="btn" style="padding:6px 12px;font-size:12px;background:#999;" onclick="selectWarmupGroup('none')">Limpar</button>
             </div>
             <div class="zap-list" id="warmupCheckboxes"></div>
             <div class="warmup-level-row">
                 <label for="warmupLevel" style="font-weight:bold;">Nível de aquecimento:</label>
                 <select id="warmupLevel" class="level-select">
-                    <option value="1">1 — Muito lento (sem mídia)</option>
-                    <option value="2">2 — Lento (sem mídia)</option>
-                    <option value="3">3 — Leve (5% imagens)</option>
-                    <option value="4">4 — Moderado (10% imagens)</option>
-                    <option value="5" selected>5 — Normal (20% imagens)</option>
+                    <option value="1">1 — Muito lento (só texto, 3-5 min entre msgs)</option>
+                    <option value="2">2 — Lento (só texto, 2-3 min entre msgs)</option>
+                    <option value="3" selected>3 — Natural (5% imagens, 1,5-2 min)</option>
+                    <option value="4">4 — Moderado (10% imagens, 1-1,5 min)</option>
+                    <option value="5">5 — Normal (20% imagens, 45-60s)</option>
                     <option value="6">6 — Ativo (25% img + 10% áudio)</option>
                     <option value="7">7 — Intenso (30% img + 15% áudio)</option>
                     <option value="8">8 — Agressivo (40% img + 20% áudio)</option>
@@ -408,7 +407,7 @@
             }
         }
 
-        function selectGroup(filter) {
+        function selectWarmupGroup(filter) {
             document.querySelectorAll('.warmup-cb').forEach((cb, idx) => {
                 const i     = idx + 1;
                 const group = getZapGroup(i);
@@ -480,7 +479,7 @@
                 box.style.display = 'block';
                 if (data.available) {
                     box.innerHTML = '<strong>Dispositivos ADB:</strong><br>' +
-                        data.devices.map(d => `${d.connected ? '✅' : '❌'} Porta ${d.port} — ${d.deviceId}`).join('<br>');
+                        data.devices.map(d => `${d.connected ? '✅' : '❌'} ${d.description} (porta ${d.port})`).join('<br>');
                 } else {
                     box.textContent = '⚠️ ADB não disponível.';
                 }

@@ -4,9 +4,26 @@ import { fileURLToPath } from 'url';
 import * as evolution from '../evolution/client.js';
 import { query } from '../database/postgres.js';
 
-const __filename  = fileURLToPath(import.meta.url);
-const __dirname   = path.dirname(__filename);
-const CONFIG_PATH = path.resolve(__dirname, '../../notification_config.json');
+const __filename      = fileURLToPath(import.meta.url);
+const __dirname       = path.dirname(__filename);
+const CONFIG_PATH     = path.resolve(__dirname, '../../notification_config.json');
+const WHITELIST_PATH  = path.resolve(__dirname, '../../whitelist_notificacao.txt');
+
+// ── Whitelist ─────────────────────────────────────────────────────────────────
+// Números neste arquivo (um por linha) nunca disparam notificação no grupo.
+// Útil para adicionar os próprios zaps de aquecimento.
+
+const loadWhitelist = () => {
+    try {
+        if (!fs.existsSync(WHITELIST_PATH)) return new Set();
+        return new Set(
+            fs.readFileSync(WHITELIST_PATH, 'utf8')
+                .split('\n')
+                .map(l => l.trim().replace(/\D/g, ''))
+                .filter(l => l.length >= 10)
+        );
+    } catch (_) { return new Set(); }
+};
 
 // ── Config persistence ────────────────────────────────────────────────────────
 
@@ -49,6 +66,8 @@ export const handleWebhookEvent = async (event) => {
     const data      = event?.data || {};
 
     try {
+        const whitelist = loadWhitelist();
+
         // ── Mensagem recebida (texto / áudio / mídia) ──────────────────────────
         if (eventName === 'MESSAGES_UPSERT') {
             const messages = Array.isArray(data) ? data : [data];
@@ -60,6 +79,7 @@ export const handleWebhookEvent = async (event) => {
                 if (remoteJid.includes('@g.us')) continue;         // mensagem de grupo
 
                 const phone    = phoneFromJid(remoteJid);
+                if (whitelist.has(phone)) continue;                // número na whitelist (ex: zap de aquecimento)
                 const pushName = msg?.pushName || '';
                 const message  = msg?.message || {};
 
@@ -109,6 +129,7 @@ export const handleWebhookEvent = async (event) => {
             if (!emoji) return; // emoji vazio = reação removida
 
             const phone     = phoneFromJid(remoteJid);
+            if (whitelist.has(phone)) return;
             const notifyZap = (await getZapThatSent(phone)) || instance;
 
             await evolution.sendText(notifyZap, groupJid,
@@ -129,6 +150,7 @@ export const handleWebhookEvent = async (event) => {
                 if (remoteJid.includes('@g.us')) continue;
 
                 const phone     = phoneFromJid(remoteJid);
+                if (whitelist.has(phone)) continue;
                 const notifyZap = (await getZapThatSent(phone)) || instance;
 
                 const icon   = status === 5 ? '🎧' : '👁️';

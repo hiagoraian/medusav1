@@ -110,7 +110,6 @@
 
     <div class="nav">
         <a href="zaps.html">🔌 Gestão de Zaps</a>
-        <a href="aquecimento.html">🔥 Aquecimento</a>
     </div>
 
     <!-- Dashboard -->
@@ -198,11 +197,11 @@
             <div class="form-group">
                 <label>🔥 Nível de Aquecimento</label>
                 <select id="warmupLevel">
-                    <option value="1">Nível 1 — Muito lento (sem mídia)</option>
-                    <option value="2">Nível 2 — Lento (sem mídia)</option>
-                    <option value="3">Nível 3 — Leve (5% imagens)</option>
-                    <option value="4">Nível 4 — Moderado (10% imagens)</option>
-                    <option value="5" selected>Nível 5 — Normal (20% imagens)</option>
+                    <option value="1">Nível 1 — Muito lento (só texto, 3-5 min)</option>
+                    <option value="2">Nível 2 — Lento (só texto, 2-3 min)</option>
+                    <option value="3" selected>Nível 3 — Natural (5% imagens, ~2 min)</option>
+                    <option value="4">Nível 4 — Moderado (10% imagens, ~1 min)</option>
+                    <option value="5">Nível 5 — Normal (20% imagens, 45-60s)</option>
                     <option value="6">Nível 6 — Ativo (25% img + áudio)</option>
                     <option value="7">Nível 7 — Intenso (30% img + áudio)</option>
                     <option value="8">Nível 8 — Agressivo</option>
@@ -472,7 +471,7 @@
             if (data.lastCycle) {
                 currentCycleId  = data.lastCycle.id;
                 const status    = data.lastCycle.status;
-                const processed = data.lastCycle.sent_count + data.lastCycle.fail_count;
+                const processed = (data.totalSent || 0) + (data.totalInvalid || 0) + (data.totalFailed || 0);
                 const total     = data.lastCycle.total_messages;
                 document.getElementById('statStatus').textContent = status.toUpperCase();
                 document.getElementById('cycleProgress').style.display = 'block';
@@ -529,7 +528,7 @@
         const startStr   = document.getElementById('startDatetime').value;
         const endStr     = document.getElementById('endDatetime').value;
 
-        const totalHours = endStr ? calcAvailableHours(endStr) : '—';
+        const totalHours = endStr ? calcAvailableHours(endStr, startStr) : '—';
         const msgsPerZap = Math.ceil(pending / selectedZaps.length);
         const blockMin   = Math.round((parseHHMM(WINDOW_END) - parseHHMM(WINDOW_START)) / 3);
 
