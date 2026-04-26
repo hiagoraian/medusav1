@@ -15,6 +15,7 @@ import { runCampaignLoop, requestStop }            from './src/services/orchestr
 import { startWarmup, stopWarmup, isWarmupRunning, getWarmupState } from './src/services/chipWarmup.js';
 import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount } from './src/services/networkController.js';
 import { generateCampaignReport }                  from './src/services/reportGenerator.js';
+import { handleWebhookEvent, getNotificationConfig, saveNotificationConfig } from './src/services/notificationForwarder.js';
 import * as evolution                              from './src/evolution/client.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,7 +25,9 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // URL base que a Evolution API (container Docker) usa para baixar mídias
-const MEDIA_HOST = process.env.MEDIA_HOST || `http://host.docker.internal:${PORT}`;
+const MEDIA_HOST    = process.env.MEDIA_HOST    || `http://host.docker.internal:${PORT}`;
+// URL base que a Evolution API usa para enviar webhooks de volta ao servidor
+const WEBHOOK_BASE  = process.env.WEBHOOK_BASE  || `http://host.docker.internal:${PORT}`;
 
 app.use(cors());
 app.use(express.json());
@@ -141,6 +144,10 @@ app.post('/api/whatsapp/start', async (req, res) => {
         const proxyConfig = await getProxyConfigForAccount(accountId);
         await evolution.createInstance(accountId, proxyConfig);
 
+        // Configura webhook automaticamente para capturar respostas e reações
+        evolution.setWebhook(accountId, `${WEBHOOK_BASE}/webhook/evolution`)
+            .catch(() => {}); // silencioso — não bloqueia o QR code
+
         const state = await evolution.getConnectionState(accountId);
         if (state === 'open') {
             return res.json({ connected: true, message: `${accountId} já está conectado.` });
@@ -165,12 +172,20 @@ app.get('/api/whatsapp/qrcode/:accountId', async (req, res) => {
 });
 
 app.post('/webhook/evolution', (req, res) => {
+    res.sendStatus(200); // responde imediatamente — nunca atrasa a Evolution API
     const event = req.body;
-    if (event?.event === 'CONNECTION_UPDATE') {
+    if (!event?.event) return;
+
+    if (event.event === 'CONNECTION_UPDATE') {
         const { instance, state } = event.data || {};
         console.log(`[WEBHOOK] ${instance}: ${state}`);
+        return;
     }
-    res.sendStatus(200);
+
+    // Notificações de resposta/reação/visualização
+    handleWebhookEvent(event).catch(err =>
+        console.warn('⚠️ [WEBHOOK]', err.message)
+    );
 });
 
 app.delete('/api/whatsapp/:accountId', async (req, res) => {
@@ -433,6 +448,46 @@ app.post('/api/warmup-chips/start', async (req, res) => {
 app.post('/api/warmup-chips/stop', (req, res) => {
     stopWarmup();
     res.json({ message: '🛑 Aquecimento parado.' });
+});
+
+// ── Notificações — grupo de respostas ────────────────────────────────────────
+
+app.get('/api/notification-group', (req, res) => {
+    res.json(getNotificationConfig());
+});
+
+app.post('/api/notification-group', (req, res) => {
+    const { groupJid, groupName } = req.body;
+    if (!groupJid) return res.status(400).json({ error: 'groupJid obrigatório.' });
+    saveNotificationConfig({ groupJid, groupName: groupName || groupJid });
+    console.log(`🔔 [NOTIF] Grupo configurado: ${groupName || groupJid} (${groupJid})`);
+    res.json({ message: '✅ Grupo de notificação salvo!' });
+});
+
+app.get('/api/groups/:accountId', async (req, res) => {
+    try {
+        const groups = await evolution.fetchGroups(req.params.accountId);
+        res.json(groups);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Reconfigura webhooks em todos os zaps conectados (útil após reinicialização)
+app.post('/api/setup-webhooks', async (req, res) => {
+    try {
+        const instances = await evolution.fetchInstances();
+        const connected = instances.filter(i =>
+            (i?.instance?.state || i?.state) === 'open'
+        );
+        const url = `${WEBHOOK_BASE}/webhook/evolution`;
+        await Promise.allSettled(
+            connected.map(i => evolution.setWebhook(i.instanceName || i.name, url))
+        );
+        res.json({ message: `✅ Webhooks configurados em ${connected.length} zap(s).` });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ── Relatórios ────────────────────────────────────────────────────────────────

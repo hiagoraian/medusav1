@@ -99,7 +99,13 @@ export const setWebhook = async (instanceName, webhookUrl) => {
         webhook: {
             enabled: true,
             url: webhookUrl,
-            events: ['MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED'],
+            events: [
+                'MESSAGES_UPSERT',
+                'MESSAGES_UPDATE',
+                'MESSAGES_REACTION',
+                'CONNECTION_UPDATE',
+                'QRCODE_UPDATED',
+            ],
             webhookByEvents: false,
             webhookBase64:   false,
         },
@@ -107,4 +113,30 @@ export const setWebhook = async (instanceName, webhookUrl) => {
     return data;
 };
 
-export default { createInstance, getQRCode, getConnectionState, fetchInstances, logoutInstance, deleteInstance, sendText, sendMedia, setWebhook };
+/** Lista grupos em que a instância participa. */
+export const fetchGroups = async (instanceName) => {
+    try {
+        const { data } = await api.get(`/group/fetchAllGroups/${instanceName}?getParticipants=false`);
+        return Array.isArray(data) ? data : [];
+    } catch (_) { return []; }
+};
+
+/** Obtém mídia de uma mensagem recebida como base64. */
+export const getMediaBase64 = async (instanceName, messageData) => {
+    try {
+        const { data } = await api.post(`/chat/getBase64FromMediaMessage/${instanceName}`, { message: messageData });
+        return data?.base64 || null;
+    } catch (_) { return null; }
+};
+
+/** Envia áudio (base64) como mensagem de voz no WhatsApp. */
+export const sendAudio = async (instanceName, number, audioBase64) => {
+    const { data } = await api.post(`/message/sendWhatsAppAudio/${instanceName}`, {
+        number,
+        audio:    audioBase64,
+        encoding: true,
+    });
+    return data;
+};
+
+export default { createInstance, getQRCode, getConnectionState, fetchInstances, logoutInstance, deleteInstance, sendText, sendMedia, setWebhook, fetchGroups, getMediaBase64, sendAudio };
