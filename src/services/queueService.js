@@ -62,18 +62,36 @@ export const updateCycleStats = async (cycleId, sentCount, failCount, status = '
 };
 
 export const getDashboardStats = async () => {
-    const { rows: pendingRows } = await query(`SELECT COUNT(*) AS total FROM messages_queue WHERE status = 'pendente'`);
-    const { rows: cycleRows }   = await query(
-        `SELECT id, status, sent_count, fail_count, total_messages
-         FROM dispatch_cycles WHERE status = 'em_andamento' ORDER BY id DESC LIMIT 1`
+    const { rows: pendingRows } = await query(
+        `SELECT COUNT(*) AS total FROM messages_queue WHERE status = 'pendente'`
     );
 
+    // Retorna o ciclo mais recente independente do status (inclui 'concluido')
+    const { rows: cycleRows } = await query(
+        `SELECT id, status, total_messages FROM dispatch_cycles ORDER BY id DESC LIMIT 1`
+    );
     const cycle = cycleRows[0] || null;
+
+    let totalSent = 0, totalFailed = 0, totalInvalid = 0;
+    if (cycle) {
+        const { rows: statsRows } = await query(
+            `SELECT status, COUNT(*) AS cnt FROM messages_queue WHERE cycle_id = $1 GROUP BY status`,
+            [cycle.id]
+        );
+        for (const row of statsRows) {
+            const n = parseInt(row.cnt, 10);
+            if (row.status === 'enviado')  totalSent    = n;
+            if (row.status === 'falha')    totalFailed  = n;
+            if (row.status === 'invalido') totalInvalid = n;
+        }
+    }
+
     return {
         totalPending: parseInt(pendingRows[0].total, 10),
-        totalSent:    cycle ? cycle.sent_count  : 0,
-        totalFailed:  cycle ? cycle.fail_count  : 0,
-        lastCycle:    cycle,
+        totalSent,
+        totalFailed,
+        totalInvalid,
+        lastCycle: cycle ? { ...cycle, sent_count: totalSent, fail_count: totalFailed } : null,
     };
 };
 

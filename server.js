@@ -281,8 +281,8 @@ app.post('/api/suspend-campaign', async (req, res) => {
  *   accounts       — JSON array de accountIds ativos
  *   messageText    — template com suporte a spintax
  *   mediaMode      — "caption" | "separate"
- *   startTime      — "HH:MM" (opcional)
- *   endTime        — "HH:MM" (opcional)
+ *   startDatetime  — ISO datetime local — quando iniciar (null = imediato)
+ *   endDatetime    — ISO datetime local — prazo final absoluto
  *   dispatchLevel  — 1 | 2 | 3
  *   warmupLevel    — 1–10
  *   mediaFile      — arquivo de mídia (opcional)
@@ -291,9 +291,8 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
     try {
         const {
             accounts, messageText, mediaMode,
+            startDatetime,
             endDatetime,
-            windowStart   = '08:00',
-            windowEnd     = '19:45',
             dispatchLevel = '2',
             warmupLevel   = '5',
         } = req.body;
@@ -320,21 +319,21 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
                 zapsSelecionados: activeAccountsList.length,
                 dispatchLevel:    parseInt(dispatchLevel),
                 warmupLevel:      parseInt(warmupLevel),
-                janela:           `${windowStart}–${windowEnd}`,
-                fim:              endDatetime || 'sem limite',
+                janela:           '08:00–19:45',
+                inicio:           startDatetime || 'imediato',
+                fim:              endDatetime   || 'sem limite',
             },
         });
 
         const campaignConfig = {
-            messageTemplate: messageText  || '',
+            messageTemplate: messageText   || '',
             mediaUrl,
             mediaType,
-            mediaMode:     mediaMode      || 'caption',
-            endDatetime:   endDatetime    || null,
-            windowStart,
-            windowEnd,
-            dispatchLevel: parseInt(dispatchLevel),
-            warmupLevel:   parseInt(warmupLevel),
+            mediaMode:      mediaMode      || 'caption',
+            startDatetime:  startDatetime  || null,
+            endDatetime:    endDatetime    || null,
+            dispatchLevel:  parseInt(dispatchLevel),
+            warmupLevel:    parseInt(warmupLevel),
         };
 
         (async () => {

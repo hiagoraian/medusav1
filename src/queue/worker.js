@@ -16,7 +16,7 @@ export const isWorkerStopped   = () => stopSignal;
 
 // ── Detecção de erros ─────────────────────────────────────────────────────────
 
-const isInvalidNumber = (err) => {
+export const isInvalidNumber = (err) => {
     const msg = (err.response?.data?.message || err.message || '').toLowerCase();
     return msg.includes('invalid') || msg.includes('not on whatsapp') ||
            msg.includes('não existe') || msg.includes('does not exist');

@@ -170,24 +170,21 @@
         <h2>3. Configuração de Disparo</h2>
 
         <div class="row">
-            <div class="form-group" style="flex:2;">
-                <label>📅 Fim da campanha</label>
+            <div class="form-group">
+                <label>▶️ Início da campanha</label>
+                <input type="datetime-local" id="startDatetime" onchange="updatePreviewInfo()">
+                <small class="hint">Deixe no passado ou agora para iniciar imediatamente.</small>
+            </div>
+            <div class="form-group">
+                <label>⏹️ Fim da campanha</label>
                 <input type="datetime-local" id="endDatetime" onchange="updatePreviewInfo()">
                 <small class="hint">Data e hora limite para encerrar os disparos.</small>
             </div>
         </div>
 
-        <div class="row" style="margin-top:5px;">
-            <div class="form-group">
-                <label>⏰ Início da janela diária</label>
-                <input type="time" id="windowStart" value="08:00" step="900" onchange="updatePreviewInfo()">
-            </div>
-            <div class="form-group">
-                <label>⏰ Fim da janela diária</label>
-                <input type="time" id="windowEnd" value="19:45" step="900" onchange="updatePreviewInfo()">
-            </div>
+        <div style="background:#e3f2fd;border-left:4px solid #1565c0;border-radius:5px;padding:10px 14px;margin-top:10px;font-size:13px;color:#1565c0;">
+            ⏰ <b>Janela fixa:</b> 08:00–19:45 · Rotação A→B→C divide a janela em 3 blocos iguais (~3h55 cada)
         </div>
-        <small class="hint">Disparos ocorrem somente dentro dessa janela, todos os dias. A rotação A→B→C divide a janela em 3 blocos iguais.</small>
 
         <div class="row" style="margin-top:15px;">
             <div class="form-group">
@@ -270,6 +267,8 @@
         2: { batchPerZap: 5, minDelayS: 60,  maxDelayS:  90 },
         3: { batchPerZap: 8, minDelayS: 45,  maxDelayS:  70 },
     };
+    const WINDOW_START = '08:00';
+    const WINDOW_END   = '19:45';
 
     let currentCycleId  = null;
     let pendingFormData = null;
@@ -395,13 +394,15 @@
         return h * 60 + m;
     }
 
-    function calcAvailableHours(endDatetimeStr, windowStart, windowEnd) {
+    function calcAvailableHours(endDatetimeStr, startDatetimeStr) {
         const now    = new Date();
+        const start  = startDatetimeStr ? new Date(startDatetimeStr) : now;
+        const from   = start > now ? start : now;  // usa o mais tardio entre now e start agendado
         const end    = new Date(endDatetimeStr);
-        const wsMin  = parseHHMM(windowStart);
-        const weMin  = parseHHMM(windowEnd);
+        const wsMin  = parseHHMM(WINDOW_START);
+        const weMin  = parseHHMM(WINDOW_END);
         let totalMin = 0;
-        const cursor = new Date(now);
+        const cursor = new Date(from);
 
         while (cursor < end) {
             const dayStart = new Date(cursor);
@@ -422,24 +423,22 @@
 
     // ── Atualiza info de preview / level ─────────────────────────────────────
     function updatePreviewInfo() {
-        const level       = parseInt(document.getElementById('dispatchLevel').value);
-        const cfg         = DISPATCH_LEVELS_CFG[level];
-        const numZaps     = document.querySelectorAll('.zap-cb:checked').length;
-        const pending     = parseInt(document.getElementById('statPending').textContent) || 0;
-        const endStr      = document.getElementById('endDatetime').value;
-        const windowStart = document.getElementById('windowStart').value;
-        const windowEnd   = document.getElementById('windowEnd').value;
-
-        const blockMin    = Math.round((parseHHMM(windowEnd) - parseHHMM(windowStart)) / 3);
-        const msgsWave    = numZaps ? cfg.batchPerZap * numZaps : '?';
+        const level    = parseInt(document.getElementById('dispatchLevel').value);
+        const cfg      = DISPATCH_LEVELS_CFG[level];
+        const numZaps  = document.querySelectorAll('.zap-cb:checked').length;
+        const pending  = parseInt(document.getElementById('statPending').textContent) || 0;
+        const endStr   = document.getElementById('endDatetime').value;
+        const blockMin = Math.round((parseHHMM(WINDOW_END) - parseHHMM(WINDOW_START)) / 3);
+        const msgsWave = numZaps ? cfg.batchPerZap * numZaps : '?';
 
         let info = `<b>Nível ${level}:</b> ${cfg.batchPerZap} msgs/zap/onda · delay ${cfg.minDelayS}–${cfg.maxDelayS}s · ${msgsWave} msgs/onda`;
         info    += ` · Bloco por grupo: <b>${blockMin} min</b> · Rotação A→B→C com IP novo entre blocos`;
 
         if (endStr && numZaps && pending) {
-            const totalHours = calcAvailableHours(endStr, windowStart, windowEnd);
+            const startStr   = document.getElementById('startDatetime').value;
+            const totalHours = calcAvailableHours(endStr, startStr);
             const msgsPerZap = Math.ceil(pending / numZaps);
-            const numDays    = Math.ceil(totalHours / (parseHHMM(windowEnd) - parseHHMM(windowStart)) * 60);
+            const numDays    = Math.ceil(totalHours / (parseHHMM(WINDOW_END) - parseHHMM(WINDOW_START)) * 60);
             const msgsPerDay = numDays > 0 ? Math.ceil(msgsPerZap / Math.max(1, numDays)) : msgsPerZap;
             info += `<br>📊 <b>${pending}</b> contatos · <b>${numZaps}</b> zaps · <b>~${msgsPerZap}</b> msgs/zap · <b>~${msgsPerDay}</b>/dia · <b>${totalHours}h</b> disponíveis`;
         }
@@ -467,7 +466,7 @@
         try {
             const data = await (await fetch('/api/dashboard-stats')).json();
             document.getElementById('statPending').textContent = data.totalPending;
-            document.getElementById('statSent').textContent    = data.totalSent;
+            document.getElementById('statSent').textContent    = data.totalSent + (data.totalInvalid || 0);
             document.getElementById('statFailed').textContent  = data.totalFailed;
 
             if (data.lastCycle) {
@@ -524,16 +523,15 @@
         const pending     = parseInt(document.getElementById('statPending').textContent) || 0;
         if (!pending) return alert('⚠️ Fila vazia. Processe uma lista primeiro.');
 
-        const level       = parseInt(document.getElementById('dispatchLevel').value);
-        const wLevel      = parseInt(document.getElementById('warmupLevel').value);
-        const cfg         = DISPATCH_LEVELS_CFG[level];
-        const endStr      = document.getElementById('endDatetime').value;
-        const windowStart = document.getElementById('windowStart').value;
-        const windowEnd   = document.getElementById('windowEnd').value;
+        const level      = parseInt(document.getElementById('dispatchLevel').value);
+        const wLevel     = parseInt(document.getElementById('warmupLevel').value);
+        const cfg        = DISPATCH_LEVELS_CFG[level];
+        const startStr   = document.getElementById('startDatetime').value;
+        const endStr     = document.getElementById('endDatetime').value;
 
-        const totalHours  = endStr ? calcAvailableHours(endStr, windowStart, windowEnd) : '—';
-        const msgsPerZap  = Math.ceil(pending / selectedZaps.length);
-        const blockMin    = Math.round((parseHHMM(windowEnd) - parseHHMM(windowStart)) / 3);
+        const totalHours = endStr ? calcAvailableHours(endStr) : '—';
+        const msgsPerZap = Math.ceil(pending / selectedZaps.length);
+        const blockMin   = Math.round((parseHHMM(WINDOW_END) - parseHHMM(WINDOW_START)) / 3);
 
         const groupCounts = { A: 0, B: 0, C: 0 };
         selectedZaps.forEach(id => {
@@ -546,15 +544,17 @@
             .map(([g, n]) => `${n} no grupo ${g}`)
             .join(' · ');
 
-        const endFormatted = endStr ? new Date(endStr).toLocaleString('pt-BR') : 'Sem prazo definido';
+        const startFormatted = startStr ? new Date(startStr).toLocaleString('pt-BR') : 'Imediato';
+        const endFormatted   = endStr   ? new Date(endStr).toLocaleString('pt-BR')   : 'Sem prazo definido';
 
         document.getElementById('previewTable').innerHTML = `
             <tr><td>Zaps selecionados</td><td>${selectedZaps.length} (${groupStr})</td></tr>
             <tr><td>Contatos na fila</td><td>${pending}</td></tr>
             <tr><td>Msgs por zap</td><td>~${msgsPerZap}</td></tr>
-            <tr><td>Janela diária</td><td>${windowStart} – ${windowEnd}</td></tr>
+            <tr><td>Janela diária (fixa)</td><td>${WINDOW_START} – ${WINDOW_END}</td></tr>
             <tr><td>Bloco por grupo (A/B/C)</td><td>~${blockMin} min</td></tr>
             <tr><td>Horas disponíveis</td><td>${totalHours}h</td></tr>
+            <tr><td>Início da campanha</td><td>${startFormatted}</td></tr>
             <tr><td>Fim da campanha</td><td>${endFormatted}</td></tr>
             <tr><td>Nível de disparo</td><td>Nível ${level} — ${cfg.batchPerZap} msgs/zap/onda</td></tr>
             <tr><td>Nível de aquecimento</td><td>Nível ${wLevel}</td></tr>
@@ -565,9 +565,8 @@
         fd.append('accounts',      JSON.stringify(selectedZaps));
         fd.append('messageText',   document.getElementById('messageText').value);
         fd.append('mediaMode',     document.getElementById('mediaMode').value);
+        fd.append('startDatetime', startStr);
         fd.append('endDatetime',   endStr);
-        fd.append('windowStart',   windowStart);
-        fd.append('windowEnd',     windowEnd);
         fd.append('dispatchLevel', level);
         fd.append('warmupLevel',   wLevel);
         const media = document.getElementById('mediaFile').files[0];
@@ -597,7 +596,7 @@
                 alert('❌ ' + data.error);
             } else {
                 const i = data.info;
-                alert(`✅ ${data.message}\n${i.totalContatos} contatos · ${i.zapsSelecionados} zaps · Nível ${i.dispatchLevel}\nJanela: ${i.janela} · Fim: ${i.fim}`);
+                alert(`✅ ${data.message}\n${i.totalContatos} contatos · ${i.zapsSelecionados} zaps · Nível ${i.dispatchLevel}\nJanela: ${i.janela} · Início: ${i.inicio} · Fim: ${i.fim}`);
             }
         } catch (_) {
             alert('Erro ao conectar com o servidor.');
@@ -650,18 +649,28 @@
         }
     }
 
-    // ── Valor inicial de data/hora de fim (amanhã 19:45) ─────────────────────
-    function setDefaultEndDatetime() {
-        const d = new Date();
-        d.setDate(d.getDate() + 1);
-        d.setHours(19, 45, 0, 0);
+    // ── Valores iniciais de data/hora ─────────────────────────────────────────
+    function toDatetimeLocal(d) {
         const pad = n => String(n).padStart(2, '0');
-        document.getElementById('endDatetime').value =
-            `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function setDefaultDatetimes() {
+        // Início: agora (arredondado para próximos 5 min)
+        const now = new Date();
+        now.setSeconds(0, 0);
+        now.setMinutes(Math.ceil(now.getMinutes() / 5) * 5);
+        document.getElementById('startDatetime').value = toDatetimeLocal(now);
+
+        // Fim: amanhã 19:45
+        const end = new Date();
+        end.setDate(end.getDate() + 1);
+        end.setHours(19, 45, 0, 0);
+        document.getElementById('endDatetime').value = toDatetimeLocal(end);
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
-    setDefaultEndDatetime();
+    setDefaultDatetimes();
     loadListas();
     checkInterrupted();
     updateDashboard();

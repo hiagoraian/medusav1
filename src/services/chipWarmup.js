@@ -268,4 +268,7 @@ export const startWarmup = async (accountsList, level = 5, rotateMins = 0) => {
 
 export const stopWarmup = () => { _manualRunning = false; };
 
+// Exportado para testes unitários
+export { buildGroups };
+
 export default { startWarmup, stopWarmup, runWarmupFor, isWarmupRunning, getWarmupState };

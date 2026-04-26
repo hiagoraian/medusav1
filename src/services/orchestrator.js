@@ -19,12 +19,19 @@ const SUBGROUP_SIZE  = 4;   // zaps por sub-grupo dentro de uma onda
 const WARMUP_PAUSE_S = 300; // segundos de aquecimento entre ondas (5 min)
 const GROUP_ORDER    = ['A', 'B', 'C'];
 
+// Janela diária de disparo — fixo; não exposto via config
+const WINDOW_START = '08:00';
+const WINDOW_END   = '19:45';
+
 // ── Estado global ─────────────────────────────────────────────────────────────
 
 let stopRequested = false;
 export const requestStop     = () => { stopRequested = true; requestWorkerStop(); };
 export const resetStop       = () => { stopRequested = false; resetWorkerStop(); };
 export const isStopRequested = () => stopRequested;
+
+// Exportados para testes unitários
+export { parseHHMM, isWithinWindow, endOfTodayWindow };
 
 // ── Utilitários de janela de horário ──────────────────────────────────────────
 
@@ -44,6 +51,16 @@ const endOfTodayWindow = (windowEnd) => {
     const d = new Date();
     d.setHours(h, m, 0, 0);
     return d;
+};
+
+const waitUntilStartDatetime = async (startDatetime) => {
+    if (!startDatetime) return;
+    const startMs = new Date(startDatetime).getTime();
+    while (!stopRequested && Date.now() < startMs) {
+        const remaining = startMs - Date.now();
+        console.log(`⏳ [ORCH] Início agendado em ${Math.ceil(remaining / 60000)} min...`);
+        await new Promise(r => setTimeout(r, Math.min(60_000, remaining)));
+    }
 };
 
 const waitUntilWindowOpens = async (windowStart, windowEnd, campaignEndTime) => {
@@ -87,22 +104,18 @@ const waitForWaveToFinish = async (cycleId) => {
 /**
  * campaignConfig campos:
  *   messageTemplate, mediaUrl, mediaType, mediaMode — conteúdo da mensagem
- *   endDatetime    — ISO string — prazo final absoluto (ex: "2026-04-27T20:00")
- *   windowStart    — "HH:MM" — início da janela diária (default "08:00")
- *   windowEnd      — "HH:MM" — fim da janela diária   (default "19:45")
+ *   startDatetime  — ISO string — quando iniciar (null = imediato)
+ *   endDatetime    — ISO string — prazo final absoluto (ex: "2026-04-27T12:00")
  *   dispatchLevel  — 1|2|3
  *   warmupLevel    — 1–10
  *
- * Rotação de grupos A→B→C:
- *   Cada ZTE tem 3 grupos de 4 zaps. O orchestrator cicla A→B→C, rodando cada
- *   grupo por 1/3 da janela diária, rotacionando IP entre transições e aquecendo
- *   os grupos inativos durante o bloco ativo.
+ * Janela diária fixada em WINDOW_START–WINDOW_END (08:00–19:45).
+ * Rotação A→B→C divide a janela em 3 blocos iguais (~3h55 cada).
  */
 export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
     const {
+        startDatetime,
         endDatetime,
-        windowStart   = '08:00',
-        windowEnd     = '19:45',
         dispatchLevel = 2,
         warmupLevel   = 5,
     } = config;
@@ -111,16 +124,21 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
     const campaignEnd = endDatetime ? new Date(endDatetime) : null;
 
     // Duração de cada bloco = 1/3 da janela diária
-    const windowDurMs = (parseHHMM(windowEnd) - parseHHMM(windowStart)) * 60_000;
+    const windowDurMs = (parseHHMM(WINDOW_END) - parseHHMM(WINDOW_START)) * 60_000;
     const blockDurMs  = Math.floor(windowDurMs / 3);
 
     resetStop();
+
+    // Aguarda data/hora de início se agendado
+    await waitUntilStartDatetime(startDatetime);
+    if (stopRequested) { resetStop(); return; }
+
     let groupIdx  = 0;
     let waveCount = 0;
 
     console.log(`\n🚀 [ORCH] Campanha iniciada`);
     console.log(`   Zaps: ${activeAccounts.length} | Nível: ${dispatchLevel} | Aquecimento: ${warmupLevel}`);
-    console.log(`   Janela: ${windowStart}–${windowEnd} | Bloco: ${Math.round(blockDurMs / 60000)} min | Fim: ${campaignEnd ? campaignEnd.toLocaleString('pt-BR') : 'sem limite'}`);
+    console.log(`   Janela: ${WINDOW_START}–${WINDOW_END} | Bloco: ${Math.round(blockDurMs / 60000)} min | Fim: ${campaignEnd ? campaignEnd.toLocaleString('pt-BR') : 'sem limite'}`);
 
     while (!stopRequested) {
         // ── Fim por data ──────────────────────────────────────────────────────
@@ -136,7 +154,7 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
         }
 
         // ── Aguarda janela de horário ─────────────────────────────────────────
-        await waitUntilWindowOpens(windowStart, windowEnd, campaignEnd);
+        await waitUntilWindowOpens(WINDOW_START, WINDOW_END, campaignEnd);
         if (stopRequested || (campaignEnd && Date.now() >= campaignEnd.getTime())) break;
 
         // ── Determina grupo ativo ─────────────────────────────────────────────
@@ -153,7 +171,7 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
         // Bloco termina no menor entre: fim do bloco, fim da janela hoje, fim da campanha
         const blockEnd = new Date(Math.min(
             Date.now() + blockDurMs,
-            endOfTodayWindow(windowEnd).getTime(),
+            endOfTodayWindow(WINDOW_END).getTime(),
             campaignEnd ? campaignEnd.getTime() : Infinity,
         ));
 
@@ -161,7 +179,7 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
 
         // ── Ondas dentro do bloco ─────────────────────────────────────────────
         while (!stopRequested && Date.now() < blockEnd.getTime()) {
-            if (!isWithinWindow(windowStart, windowEnd)) break;
+            if (!isWithinWindow(WINDOW_START, WINDOW_END)) break;
 
             const batch = await getPendingMessages(level.batchPerZap * groupZaps.length);
             if (batch.length === 0) break;
