@@ -9,7 +9,7 @@ import { initSchema, query }                        from './src/database/postgre
 import { processExcelFiles }                       from './src/services/excelProcessor.js';
 import {
     addContactsToQueue, countPending, createCycle,
-    getDashboardStats, clearQueue, resetCampaign, getInterruptedCycle,
+    getDashboardStats, clearQueue, resetCampaign, getInterruptedCycle, updateCycleStats,
 } from './src/services/queueService.js';
 import { runCampaignLoop, requestStop }            from './src/services/orchestrator.js';
 import { startWarmup, stopWarmup, isWarmupRunning, getWarmupState } from './src/services/chipWarmup.js';
@@ -75,8 +75,26 @@ const uploadMedia = multer({
     }
 })();
 
-process.on('uncaughtException',  (err) => console.error('🚨 uncaughtException:', err.message));
-process.on('unhandledRejection', (err) => console.error('🚨 unhandledRejection:', err?.message || err));
+// cycleId da campanha ativa — usado pelo crash handler para salvar relatório
+let _activeCycleId = null;
+
+const crashHandler = async (type, err) => {
+    console.error(`🚨 [CRASH] ${type}:`, err?.message || err);
+    if (_activeCycleId) {
+        console.error(`🚨 [CRASH] Salvando relatório da campanha ${_activeCycleId}...`);
+        try {
+            await updateCycleStats(_activeCycleId, 0, 0, 'interrompido');
+            await generateCampaignReport(_activeCycleId);
+            console.error('🚨 [CRASH] Relatório salvo.');
+        } catch (e) {
+            console.error('🚨 [CRASH] Falha ao salvar relatório:', e.message);
+        }
+    }
+    process.exit(1);
+};
+
+process.on('uncaughtException',  (err) => crashHandler('uncaughtException',  err));
+process.on('unhandledRejection', (err) => crashHandler('unhandledRejection', err));
 
 // ── Geral ─────────────────────────────────────────────────────────────────────
 
@@ -337,9 +355,11 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
         };
 
         (async () => {
+            _activeCycleId = cycleId;
             try {
                 await runCampaignLoop(activeAccountsList, campaignConfig, cycleId);
             } finally {
+                _activeCycleId = null;
                 if (req.file) {
                     const filePath = path.join(__dirname, 'uploads', req.file.filename);
                     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
