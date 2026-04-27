@@ -102,7 +102,6 @@ export const setWebhook = async (instanceName, webhookUrl) => {
             events: [
                 'MESSAGES_UPSERT',
                 'MESSAGES_UPDATE',
-                'MESSAGES_REACTION',
                 'CONNECTION_UPDATE',
                 'QRCODE_UPDATED',
             ],

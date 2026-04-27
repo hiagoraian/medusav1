@@ -286,14 +286,13 @@
                     return;
                 }
 
-                if (data.qrcode) {
-                    // Sem cache — precisa escanear QR
-                    openQRModal(accountId);
-                } else if (hasInstance) {
-                    // Tem cache — reconectando em background, só atualiza status
-                    refreshStatus();
-                    setTimeout(refreshStatus, 4000);
+                if (data.error) {
+                    alert(`Erro: ${data.error}`);
+                    return;
                 }
+
+                // Abre o modal sempre — o polling interno busca o QR quando ficar pronto
+                openQRModal(accountId);
             } catch (_) {
                 alert('Erro ao conectar.');
             }

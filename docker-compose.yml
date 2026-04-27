@@ -13,12 +13,22 @@ services:
       DATABASE_ENABLED: "true"
       DATABASE_PROVIDER: postgresql
       DATABASE_CONNECTION_URI: postgresql://medusa:${POSTGRES_PASSWORD}@postgres:5432/evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_DATA_OLD_MESSAGE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_DATA_HISTORY: "false"
       CACHE_REDIS_ENABLED: "true"
       CACHE_REDIS_URI: redis://redis:6379/6
       CACHE_REDIS_PREFIX_KEY: evolution
       QRCODE_LIMIT: "55"
       LANGUAGE: pt-BR
-      LOG_LEVEL: ERROR,WARN
+      LOG_LEVEL: ERROR,WARN,LOG,INFO,DEBUG
+      LOG_BAILEYS: trace
+      DEL_INSTANCE: "false"
+      CONFIG_SESSION_PHONE_VERSION: ""
     volumes:
       - evolution_instances:/evolution/instances
     depends_on:
