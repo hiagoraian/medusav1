@@ -12,7 +12,6 @@
         .btn:hover { background-color: #128C7E; }
         .btn:disabled { background-color: #ccc; cursor: not-allowed; }
         .btn-secondary { background-color: #34b7f1; }
-        .btn-warmup { background-color: #ff6f00; }
         .btn-danger { background-color: #d32f2f; }
         .btn-reconnect-all { background-color: #075e54; }
         .btn-reconnect-all:hover { background-color: #054c44; }
@@ -30,12 +29,6 @@
         .nav { display: flex; gap: 10px; margin-bottom: 20px; }
         .nav a { padding: 10px 20px; background: #f0f0f0; border-radius: 5px; text-decoration: none; color: #075e54; font-weight: bold; }
         .nav a:hover { background: #e0e0e0; }
-        .warmup-controls { display: flex; gap: 10px; margin-top: 15px; align-items: center; flex-wrap: wrap; }
-        .warmup-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: #ccc; flex-shrink: 0; }
-        .warmup-dot.online  { background: #25D366; }
-        .warmup-dot.offline { background: #d32f2f; }
-        .level-select { padding: 8px 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; background: #fff; }
-        .warmup-level-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
         .reconnect-bar { margin-top: 15px; display: none; }
         .reconnect-bar .progress-track { background: #e0e0e0; border-radius: 20px; height: 10px; overflow: hidden; margin: 8px 0; }
         .reconnect-bar .progress-fill  { height: 100%; width: 0%; background: #25D366; border-radius: 20px; transition: width 0.4s ease; }
@@ -77,6 +70,7 @@
 
         <div class="nav">
             <a href="index.html">← Painel</a>
+            <a href="aquecimento.html">🔥 Aquecimento</a>
         </div>
 
         <div class="section">
@@ -92,39 +86,6 @@
             </div>
 
             <div class="zap-list" id="zapsList"></div>
-        </div>
-
-        <div class="section">
-            <h2>Aquecimento de Chips</h2>
-            <p>Selecione os Zaps que deseja aquecer (mínimo 2):</p>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectWarmupGroup('A')">Selecionar Grupo A</button>
-                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectWarmupGroup('B')">Selecionar Grupo B</button>
-                <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="selectWarmupGroup('C')">Selecionar Grupo C</button>
-                <button class="btn" style="padding:6px 12px;font-size:12px;background:#555;" onclick="selectWarmupGroup('all')">Todos</button>
-                <button class="btn" style="padding:6px 12px;font-size:12px;background:#999;" onclick="selectWarmupGroup('none')">Limpar</button>
-            </div>
-            <div class="zap-list" id="warmupCheckboxes"></div>
-            <div class="warmup-level-row">
-                <label for="warmupLevel" style="font-weight:bold;">Nível de aquecimento:</label>
-                <select id="warmupLevel" class="level-select">
-                    <option value="1">1 — Muito lento (só texto, 3-5 min entre msgs)</option>
-                    <option value="2">2 — Lento (só texto, 2-3 min entre msgs)</option>
-                    <option value="3" selected>3 — Natural (5% imagens, 1,5-2 min)</option>
-                    <option value="4">4 — Moderado (10% imagens, 1-1,5 min)</option>
-                    <option value="5">5 — Normal (20% imagens, 45-60s)</option>
-                    <option value="6">6 — Ativo (25% img + 10% áudio)</option>
-                    <option value="7">7 — Intenso (30% img + 15% áudio)</option>
-                    <option value="8">8 — Agressivo (40% img + 20% áudio)</option>
-                    <option value="9">9 — Muito agressivo (50% img + 25% áudio)</option>
-                    <option value="10">10 — Máximo (60% img + 30% áudio)</option>
-                </select>
-            </div>
-            <div class="warmup-controls">
-                <button id="btnStartWarmup" class="btn btn-warmup" style="flex: 2;" onclick="startWarmup()">🔥 Iniciar Aquecimento</button>
-                <button id="btnStopWarmup" class="btn btn-danger" style="flex: 1;" onclick="stopWarmup()" disabled>🛑 Parar</button>
-            </div>
-            <div id="warmupResult" class="info-box" style="display: none;"></div>
         </div>
 
         <div class="section">
@@ -223,7 +184,6 @@
                 const data   = await res.json();
                 const online = new Set(data.filter(z => z.state === 'open').map(z => z.accountId));
                 renderZapCards(data);
-                populateWarmupCheckboxes(online);
                 populateNotifZapSelect(data);
             } catch (err) {
                 console.error('Erro ao atualizar status:', err);
@@ -374,101 +334,6 @@
             }, 6000);
         }
 
-        // ── Aquecimento ───────────────────────────────────────
-        let _zapsOnlineSet = new Set();
-
-        function getZapGroup(i) {
-            const pos = (i - 1) % 12;
-            if (pos < 4) return 'A';
-            if (pos < 8) return 'B';
-            return 'C';
-        }
-
-        function getZapZte(i) { return Math.ceil(i / 12); }
-
-        function populateWarmupCheckboxes(onlineSet = new Set()) {
-            _zapsOnlineSet = onlineSet;
-            const container = document.getElementById('warmupCheckboxes');
-            container.innerHTML = '';
-            for (let i = 1; i <= 48; i++) {
-                const id     = `WA-${String(i).padStart(2, '0')}`;
-                const online = onlineSet.has(id);
-                const group  = getZapGroup(i);
-                const zte    = getZapZte(i);
-                const label  = document.createElement('label');
-                label.style.cssText = 'display:flex;align-items:center;padding:8px 10px;background:#fff;border:1px solid #ccc;border-radius:5px;cursor:pointer;gap:6px;font-size:13px;';
-                label.innerHTML = `
-                    <input type="checkbox" class="warmup-cb" value="${id}">
-                    <span class="warmup-dot ${online ? 'online' : 'offline'}"></span>
-                    <span style="font-weight:bold;">${id}</span>
-                    <span style="color:#888;font-size:11px;">ZTE${zte}-${group}</span>`;
-                container.appendChild(label);
-            }
-        }
-
-        function selectWarmupGroup(filter) {
-            document.querySelectorAll('.warmup-cb').forEach((cb, idx) => {
-                const i     = idx + 1;
-                const group = getZapGroup(i);
-                if      (filter === 'all')  cb.checked = true;
-                else if (filter === 'none') cb.checked = false;
-                else                        cb.checked = (group === filter);
-            });
-        }
-
-        async function startWarmup() {
-            const selected = Array.from(document.querySelectorAll('.warmup-cb:checked')).map(cb => cb.value);
-            if (selected.length < 2) { alert('Selecione pelo menos 2 Zaps.'); return; }
-
-            const level = parseInt(document.getElementById('warmupLevel').value);
-
-            document.getElementById('btnStartWarmup').innerHTML = '⏳ Aquecendo...';
-            document.getElementById('btnStartWarmup').disabled = true;
-            document.getElementById('btnStopWarmup').disabled  = false;
-
-            try {
-                const res  = await fetch('/api/warmup-chips/start', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ accounts: selected, level }),
-                });
-                const data = await res.json();
-                const box  = document.getElementById('warmupResult');
-                box.style.display = 'block';
-                box.textContent   = data.message || data.error;
-            } catch (_) {
-                setWarmupStopped();
-            }
-        }
-
-        async function stopWarmup() {
-            await fetch('/api/warmup-chips/stop', { method: 'POST' });
-            const box = document.getElementById('warmupResult');
-            box.style.display = 'block';
-            box.textContent   = '🛑 Aquecimento parado.';
-            setWarmupStopped();
-        }
-
-        function setWarmupStopped() {
-            document.getElementById('btnStartWarmup').innerHTML = '🔥 Iniciar Aquecimento';
-            document.getElementById('btnStartWarmup').disabled  = false;
-            document.getElementById('btnStopWarmup').disabled   = true;
-        }
-
-        async function checkWarmupStatus() {
-            try {
-                const res  = await fetch('/api/warmup-status');
-                const data = await res.json();
-                if (data.running) {
-                    document.getElementById('btnStartWarmup').innerHTML = '⏳ Aquecendo...';
-                    document.getElementById('btnStartWarmup').disabled  = true;
-                    document.getElementById('btnStopWarmup').disabled   = false;
-                    const box = document.getElementById('warmupResult');
-                    box.style.display = 'block';
-                    box.textContent   = '🔥 Aquecimento em andamento...';
-                }
-            } catch (_) {}
-        }
-
         // ── Manutenção ────────────────────────────────────────
         async function checkDevices() {
             try {
@@ -593,10 +458,8 @@
         }
 
         // ── Init ──────────────────────────────────────────────
-        populateWarmupCheckboxes();
         loadNotifConfig();
         refreshStatus();
-        checkWarmupStatus();
         setInterval(refreshStatus, 10000);
     </script>
 </body>
