@@ -239,4 +239,105 @@ export const startWarmup = async (accountsList, level = 2, rotateMins = 0) => {
 
 export const stopWarmup = () => { _manualRunning = false; };
 
-export default { startWarmup, stopWarmup, runWarmupFor, isWarmupRunning, getWarmupState, clearOwnerCache, buildPairs };
+// ── Helpers de janela horária ─────────────────────────────────────────────────
+
+const parseHHMM = (hhmm) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
+};
+
+const isWithinWindow = (windowStart, windowEnd) => {
+    const now    = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    return nowMin >= parseHHMM(windowStart) && nowMin < parseHHMM(windowEnd);
+};
+
+const msUntilWindowOpen = (windowStart) => {
+    const now    = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const [sh, sm] = windowStart.split(':').map(Number);
+    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), sh, sm, 0);
+    if (target <= now) target.setDate(target.getDate() + 1);
+    return target.getTime() - now.getTime();
+};
+
+const endOfWindowToday = (windowEnd) => {
+    const [h, m] = windowEnd.split(':').map(Number);
+    const d = new Date();
+    d.setHours(h, m, 0, 0);
+    return d;
+};
+
+// ── API pública: aquecimento agendado com janela diária ───────────────────────
+export const startScheduledWarmup = async (
+    accountsList,
+    level       = 2,
+    startDatetime,         // ISO string ou null = imediato
+    endDatetime,           // ISO string — prazo final absoluto
+    windowStart = '08:00',
+    windowEnd   = '19:00',
+) => {
+    if (_manualRunning) {
+        console.warn('⚠️ [AQUECIMENTO] Já está rodando. Ignorando.');
+        return;
+    }
+
+    _manualRunning = true;
+    const endMs    = new Date(endDatetime).getTime();
+
+    _warmupState = {
+        running: true, level, zapCount: accountsList.length, rotateMins: 0,
+        startedAt: Date.now(),
+        scheduled: true, endDatetime, windowStart, windowEnd,
+    };
+
+    // ── 1. Aguarda data/hora de início ────────────────────────────────────────
+    if (startDatetime) {
+        const startMs = new Date(startDatetime).getTime();
+        while (_manualRunning && Date.now() < startMs) {
+            const diffMin = Math.ceil((startMs - Date.now()) / 60_000);
+            console.log(`⏳ [AQUECIMENTO] Início agendado em ${diffMin} min (${new Date(startMs).toLocaleString('pt-BR')})`);
+            await new Promise(r => setTimeout(r, Math.min(60_000, startMs - Date.now())));
+        }
+        if (!_manualRunning) { _warmupState = { running: false }; return; }
+    }
+
+    console.log(`🔥 [AQUECIMENTO] Agendado iniciado`);
+    console.log(`   Janela: ${windowStart}–${windowEnd} | Fim: ${new Date(endMs).toLocaleString('pt-BR')}`);
+
+    // ── 2. Loop diário respeitando a janela ───────────────────────────────────
+    while (_manualRunning && Date.now() < endMs) {
+
+        if (!isWithinWindow(windowStart, windowEnd)) {
+            const waitMs  = msUntilWindowOpen(windowStart);
+            const waitMin = Math.ceil(waitMs / 60_000);
+            console.log(`⏰ [AQUECIMENTO] Fora da janela ${windowStart}–${windowEnd}. Retomando em ${waitMin} min.`);
+            // Espera em fatias de 5 min para poder ser interrompido
+            const sleepUntil = Date.now() + waitMs;
+            while (_manualRunning && Date.now() < sleepUntil) {
+                await new Promise(r => setTimeout(r, Math.min(300_000, sleepUntil - Date.now())));
+            }
+            continue;
+        }
+
+        // Dentro da janela — calcula quanto tempo resta (janela ou prazo final)
+        const windowCloseMs = endOfWindowToday(windowEnd).getTime();
+        const durationMs    = Math.min(windowCloseMs, endMs) - Date.now();
+
+        if (durationMs < 60_000) {
+            // Menos de 1 min restante na janela — espera a janela fechar
+            await new Promise(r => setTimeout(r, durationMs + 5_000));
+            continue;
+        }
+
+        const durationSec = Math.floor(durationMs / 1000);
+        console.log(`🔥 [AQUECIMENTO] Janela aberta — aquecendo por ${Math.round(durationSec / 60)} min`);
+        await runWarmupFor(accountsList, level, durationSec);
+    }
+
+    _manualRunning = false;
+    _warmupState   = { running: false, level: 0, zapCount: 0, rotateMins: 0, startedAt: null };
+    console.log('✅ [AQUECIMENTO] Agendamento concluído.');
+};
+
+export default { startWarmup, stopWarmup, startScheduledWarmup, runWarmupFor, isWarmupRunning, getWarmupState, clearOwnerCache, buildPairs };

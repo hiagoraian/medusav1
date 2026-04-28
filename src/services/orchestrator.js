@@ -7,6 +7,8 @@ import { startWorkers, stopWorkers, requestWorkerStop, resetWorkerStop }     fro
 import { rotateMobileIPsStaggered, getZapsByGroup, getActiveZteIds }         from './networkController.js';
 import { runWarmupFor }                                                      from './chipWarmup.js';
 import { generateCampaignReport }                                            from './reportGenerator.js';
+import * as evolution                                                        from '../evolution/client.js';
+import { waitForAck }                                                        from './ackWaiter.js';
 
 // ── Configuração de nível de disparo ─────────────────────────────────────────
 const DISPATCH_LEVELS = {
@@ -15,9 +17,46 @@ const DISPATCH_LEVELS = {
     3: { batchPerZap: 8, minDelayS: 45,  maxDelayS:  70 },
 };
 
-const SUBGROUP_SIZE  = 4;   // zaps por sub-grupo dentro de uma onda
-const WARMUP_PAUSE_S = 300; // segundos de aquecimento entre ondas (5 min)
-const GROUP_ORDER    = ['A', 'B', 'C'];
+const SUBGROUP_SIZE       = 4;    // zaps por sub-grupo dentro de uma onda
+const WARMUP_PAUSE_S      = 300;  // segundos de aquecimento entre ondas (5 min)
+const GROUP_ORDER         = ['A', 'B', 'C'];
+const HEALTH_CHECK_NUMBER = process.env.HEALTH_CHECK_NUMBER || '5538999852426';
+
+// ── Health check pré-disparo ──────────────────────────────────────────────────
+// Envia mensagem de teste para HEALTH_CHECK_NUMBER antes de cada onda.
+// Zaps que falham são removidos daquela onda.
+const preflightCheck = async (accounts) => {
+    const healthy = [];
+    const sick    = [];
+
+    await Promise.allSettled(accounts.map(async (id) => {
+        try {
+            const res   = await evolution.sendText(id, HEALTH_CHECK_NUMBER, '🟢 Medusa — verificação pré-disparo');
+            const keyId = res?.key?.id;
+
+            if (keyId) {
+                // Aguarda confirmação do servidor WA (SERVER_ACK) em até 8s
+                const acked = await waitForAck(keyId, 8000);
+                if (!acked) {
+                    console.warn(`🔴 [PREFLIGHT] ${id} suspenso — mensagem enviada mas sem confirmação WA (ghost send)`);
+                    sick.push(id);
+                    return;
+                }
+            }
+
+            console.log(`✅ [PREFLIGHT] ${id} OK`);
+            healthy.push(id);
+        } catch (err) {
+            console.warn(`🔴 [PREFLIGHT] ${id} suspenso — ${err.response?.data?.message || err.message}`);
+            sick.push(id);
+        }
+    }));
+
+    if (sick.length > 0) {
+        console.warn(`⚠️ [PREFLIGHT] ${sick.length} zap(s) suspenso(s): ${sick.join(', ')}`);
+    }
+    return healthy;
+};
 
 // Janela diária de disparo — fixo; não exposto via config
 const WINDOW_START = '08:00';
@@ -191,20 +230,31 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
         while (!stopRequested && Date.now() < blockEnd.getTime()) {
             if (!testMode && !isWithinWindow(WINDOW_START, WINDOW_END)) break;
 
-            const batch = await getPendingMessages(level.batchPerZap * groupZaps.length);
+            // ── Health check: remove zaps que não conseguem enviar ────────────
+            console.log(`  🔍 [PREFLIGHT] Verificando ${groupZaps.length} zap(s)...`);
+            const healthyZaps = await preflightCheck(groupZaps);
+            if (healthyZaps.length === 0) {
+                console.error('🔴 [ORCH] Nenhum zap passou no preflight. Encerrando bloco.');
+                break;
+            }
+            if (healthyZaps.length < groupZaps.length) {
+                console.warn(`⚠️ [ORCH] Continuando com ${healthyZaps.length}/${groupZaps.length} zap(s) saudáveis.`);
+            }
+
+            const batch = await getPendingMessages(level.batchPerZap * healthyZaps.length);
             if (batch.length === 0) break;
 
             await assignMessagesToCycle(batch.map(r => r.id), cycleId);
 
-            const offsets = buildSubGroupOffsets(groupZaps, level.minDelayS * 1_000);
-            const numSubs = Math.ceil(groupZaps.length / SUBGROUP_SIZE);
+            const offsets = buildSubGroupOffsets(healthyZaps, level.minDelayS * 1_000);
+            const numSubs = Math.ceil(healthyZaps.length / SUBGROUP_SIZE);
             waveCount++;
 
-            console.log(`  🌊 Onda ${waveCount} [Grupo ${groupLetter}] — ${batch.length} msgs — ${groupZaps.length} zap(s) — ${numSubs} sub-grupo(s)`);
+            console.log(`  🌊 Onda ${waveCount} [Grupo ${groupLetter}] — ${batch.length} msgs — ${healthyZaps.length} zap(s) — ${numSubs} sub-grupo(s)`);
 
             const waveStartMs = Date.now();
-            await publishBulk(batch, groupZaps);
-            await startWorkers(groupZaps, {
+            await publishBulk(batch, healthyZaps);
+            await startWorkers(healthyZaps, {
                 ...config,
                 cycleId,
                 minDelayS:       level.minDelayS,

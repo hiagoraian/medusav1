@@ -12,10 +12,11 @@ import {
     getDashboardStats, clearQueue, resetCampaign, getInterruptedCycle, updateCycleStats,
 } from './src/services/queueService.js';
 import { runCampaignLoop, requestStop }            from './src/services/orchestrator.js';
-import { startWarmup, stopWarmup, isWarmupRunning, getWarmupState } from './src/services/chipWarmup.js';
+import { startWarmup, stopWarmup, startScheduledWarmup, isWarmupRunning, getWarmupState } from './src/services/chipWarmup.js';
 import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount } from './src/services/networkController.js';
 import { generateCampaignReport }                  from './src/services/reportGenerator.js';
 import { handleWebhookEvent, getNotificationConfig, saveNotificationConfig } from './src/services/notificationForwarder.js';
+import { notifyAck }                              from './src/services/ackWaiter.js';
 import * as evolution                              from './src/evolution/client.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -180,6 +181,18 @@ app.post('/webhook/evolution', (req, res) => {
         const { instance, state } = event.data || {};
         console.log(`[WEBHOOK] ${instance}: ${state}`);
         return;
+    }
+
+    // Confirma ACKs para o preflight check (SERVER_ACK ou superior)
+    if (event.event === 'messages.update' || event.event === 'MESSAGES_UPDATE') {
+        const updates = Array.isArray(event.data) ? event.data : [event.data];
+        for (const upd of updates) {
+            const fromMe = upd?.key?.fromMe ?? upd?.fromMe;
+            const keyId  = upd?.key?.id     || upd?.keyId;
+            const status = upd?.update?.status ?? upd?.status;
+            const isAcked = status >= 2 || status === 'SERVER_ACK' || status === 'DELIVERY_ACK' || status === 'READ';
+            if (fromMe && keyId && isAcked) notifyAck(keyId);
+        }
     }
 
     // Notificações desativadas temporariamente
@@ -450,6 +463,23 @@ app.post('/api/warmup-chips/start', async (req, res) => {
 app.post('/api/warmup-chips/stop', (req, res) => {
     stopWarmup();
     res.json({ message: '🛑 Aquecimento parado.' });
+});
+
+app.post('/api/warmup-chips/scheduled', async (req, res) => {
+    try {
+        const { accounts, level = 2, startDatetime, endDatetime, windowStart = '08:00', windowEnd = '19:00' } = req.body;
+        if (!Array.isArray(accounts) || accounts.length < 2)
+            return res.status(400).json({ error: 'Mínimo 2 contas.' });
+        if (!endDatetime)
+            return res.status(400).json({ error: 'endDatetime obrigatório.' });
+        if (isWarmupRunning())
+            return res.status(400).json({ error: 'Aquecimento já está em andamento.' });
+
+        res.json({ message: `🔥 Aquecimento agendado — janela ${windowStart}–${windowEnd} — até ${new Date(endDatetime).toLocaleString('pt-BR')}` });
+        startScheduledWarmup(accounts, parseInt(level), startDatetime || null, endDatetime, windowStart, windowEnd);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ── Notificações — grupo de respostas ────────────────────────────────────────

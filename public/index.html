@@ -116,7 +116,8 @@
     <div class="dashboard">
         <div class="stat-card"><h3>Pendentes</h3><p id="statPending">0</p></div>
         <div class="stat-card"><h3>Enviados</h3><p id="statSent">0</p></div>
-        <div class="stat-card"><h3>Falhas</h3><p id="statFailed" style="color:#d32f2f;">0</p></div>
+        <div class="stat-card"><h3>Inválidos</h3><p id="statInvalid" style="color:#e65100;">0</p></div>
+        <div class="stat-card"><h3>Falhas Técnicas</h3><p id="statFailed" style="color:#d32f2f;">0</p></div>
         <div class="stat-card"><h3>Status</h3><p id="statStatus" style="font-size:16px;">Pronto</p></div>
     </div>
 
@@ -469,7 +470,8 @@
         try {
             const data = await (await fetch('/api/dashboard-stats')).json();
             document.getElementById('statPending').textContent = data.totalPending;
-            document.getElementById('statSent').textContent    = data.totalSent + (data.totalInvalid || 0);
+            document.getElementById('statSent').textContent    = data.totalSent;
+            document.getElementById('statInvalid').textContent = data.totalInvalid || 0;
             document.getElementById('statFailed').textContent  = data.totalFailed;
 
             if (data.lastCycle) {

@@ -131,10 +131,41 @@
         <div class="level-info" id="levelInfo"></div>
     </div>
 
-    <!-- 3. Ações -->
+    <!-- 3. Agendamento -->
+    <div class="section">
+        <h2>3. Agendamento <span style="font-size:13px;color:#888;font-weight:normal;">(opcional — deixe em branco para iniciar imediatamente)</span></h2>
+        <div class="config-row">
+            <div class="config-group">
+                <label>📅 Início</label>
+                <input type="datetime-local" id="scheduleStart" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:5px;font-size:14px;">
+                <small style="color:#888;">Vazio = iniciar agora</small>
+            </div>
+            <div class="config-group">
+                <label>📅 Fim</label>
+                <input type="datetime-local" id="scheduleEnd" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:5px;font-size:14px;">
+                <small style="color:#888;">Obrigatório para agendamento</small>
+            </div>
+        </div>
+        <div class="config-row" style="margin-top:12px;">
+            <div class="config-group">
+                <label>🕗 Horário diário — início</label>
+                <input type="time" id="windowStart" value="08:00" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:5px;font-size:14px;">
+            </div>
+            <div class="config-group">
+                <label>🕖 Horário diário — fim</label>
+                <input type="time" id="windowEnd" value="19:00" style="width:100%;padding:10px;border:1px solid #ccc;border-radius:5px;font-size:14px;">
+            </div>
+        </div>
+        <div style="margin-top:10px;padding:10px 14px;background:#e8f5e9;border-radius:6px;font-size:13px;color:#2e7d32;" id="schedulePreview">
+            Configure início, fim e horário diário acima.
+        </div>
+    </div>
+
+    <!-- 4. Ações -->
     <div class="action-row">
-        <button class="btn btn-warmup" id="btnStart" onclick="startWarmup()">🔥 Iniciar Aquecimento</button>
-        <button class="btn btn-danger" id="btnStop"  onclick="stopWarmup()" disabled>🛑 Parar</button>
+        <button class="btn btn-warmup" id="btnStart"     onclick="startWarmup()">🔥 Iniciar Agora</button>
+        <button class="btn"            id="btnSchedule"  onclick="scheduleWarmup()" style="background:#1565c0;">📅 Agendar</button>
+        <button class="btn btn-danger" id="btnStop"      onclick="stopWarmup()" disabled>🛑 Parar</button>
     </div>
 </div>
 
@@ -243,9 +274,14 @@
                 const mins = data.startedAt
                     ? Math.floor((Date.now() - data.startedAt) / 60000)
                     : 0;
-                const rotateStr = data.rotateMins > 0 ? ` · ✈️ rotação a cada ${data.rotateMins} min` : '';
-                document.getElementById('statusDetail').textContent =
-                    `Nível ${data.level} · ${data.zapCount} zap(s) em aquecimento · ${mins} min rodando${rotateStr}`;
+                let detail = `Nível ${data.level} · ${data.zapCount} zap(s) · ${mins} min rodando`;
+                if (data.scheduled) {
+                    const end = new Date(data.endDatetime).toLocaleString('pt-BR');
+                    detail += ` · 📅 Agendado — janela ${data.windowStart}–${data.windowEnd} — até ${end}`;
+                } else if (data.rotateMins > 0) {
+                    detail += ` · ✈️ rotação a cada ${data.rotateMins} min`;
+                }
+                document.getElementById('statusDetail').textContent = detail;
                 setRunningUI(true);
             } else {
                 banner.classList.remove('active');
@@ -255,9 +291,10 @@
     }
 
     function setRunningUI(running) {
-        document.getElementById('btnStart').disabled = running;
-        document.getElementById('btnStop').disabled  = !running;
-        document.getElementById('btnStart').textContent = running ? '⏳ Aquecendo...' : '🔥 Iniciar Aquecimento';
+        document.getElementById('btnStart').disabled    = running;
+        document.getElementById('btnSchedule').disabled = running;
+        document.getElementById('btnStop').disabled     = !running;
+        document.getElementById('btnStart').textContent = running ? '⏳ Aquecendo...' : '🔥 Iniciar Agora';
     }
 
     // ── Zap status ───────────────────────────────────────────────────────────
@@ -338,6 +375,91 @@
             btn.textContent = '📱 Situação ADB';
         }
     }
+
+    // ── Agendamento ──────────────────────────────────────────────────────────
+    function updateSchedulePreview() {
+        const startVal   = document.getElementById('scheduleStart').value;
+        const endVal     = document.getElementById('scheduleEnd').value;
+        const winStart   = document.getElementById('windowStart').value || '08:00';
+        const winEnd     = document.getElementById('windowEnd').value   || '19:00';
+        const preview    = document.getElementById('schedulePreview');
+
+        if (!endVal) {
+            preview.textContent = 'Configure o fim do agendamento para ver o resumo.';
+            preview.style.background = '#fff3e0';
+            return;
+        }
+
+        const startFmt = startVal
+            ? new Date(startVal).toLocaleString('pt-BR')
+            : 'Agora';
+        const endFmt   = new Date(endVal).toLocaleString('pt-BR');
+
+        // Calcular dias e horas disponíveis
+        const startMs  = startVal ? new Date(startVal).getTime() : Date.now();
+        const endMs    = new Date(endVal).getTime();
+        const [sh, sm] = winStart.split(':').map(Number);
+        const [eh, em] = winEnd.split(':').map(Number);
+        const dailyHours = Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60).toFixed(1);
+        const totalDays  = Math.ceil((endMs - startMs) / 86_400_000);
+
+        preview.innerHTML = `📅 <strong>Início:</strong> ${startFmt} &nbsp;|&nbsp; <strong>Fim:</strong> ${endFmt}<br>` +
+            `⏰ <strong>Janela diária:</strong> ${winStart}–${winEnd} (${dailyHours}h/dia) &nbsp;|&nbsp; <strong>~${totalDays} dia(s)</strong>`;
+        preview.style.background = '#e8f5e9';
+    }
+
+    async function scheduleWarmup() {
+        const selected = Array.from(document.querySelectorAll('.warmup-cb:checked')).map(cb => cb.value);
+        if (selected.length < 2) return alert('Selecione pelo menos 2 Zaps.');
+
+        const endVal = document.getElementById('scheduleEnd').value;
+        if (!endVal) return alert('⚠️ Defina a data/hora de fim do agendamento.');
+
+        const level      = parseInt(document.getElementById('warmupLevel').value);
+        const startVal   = document.getElementById('scheduleStart').value;
+        const winStart   = document.getElementById('windowStart').value || '08:00';
+        const winEnd     = document.getElementById('windowEnd').value   || '19:00';
+
+        setRunningUI(true);
+        try {
+            const res  = await fetch('/api/warmup-chips/scheduled', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({
+                    accounts:      selected,
+                    level,
+                    startDatetime: startVal || null,
+                    endDatetime:   endVal,
+                    windowStart:   winStart,
+                    windowEnd:     winEnd,
+                }),
+            });
+            const data = await res.json();
+            if (data.error) { alert('❌ ' + data.error); setRunningUI(false); }
+            else { alert('✅ ' + data.message); await checkStatus(); }
+        } catch (_) {
+            alert('Erro ao conectar com o servidor.');
+            setRunningUI(false);
+        }
+    }
+
+    // Atualiza preview ao mudar inputs de agendamento
+    ['scheduleStart','scheduleEnd','windowStart','windowEnd'].forEach(id =>
+        document.getElementById(id).addEventListener('change', updateSchedulePreview)
+    );
+
+    // Preenche data de início padrão (agora arredondado para próxima hora)
+    (function setDefaultDates() {
+        const now = new Date();
+        now.setMinutes(0, 0, 0);
+        now.setHours(now.getHours() + 1);
+        const fmt = d => d.toISOString().slice(0, 16);
+        document.getElementById('scheduleStart').value = fmt(now);
+        const end = new Date(now);
+        end.setDate(end.getDate() + 3);
+        document.getElementById('scheduleEnd').value = fmt(end);
+        updateSchedulePreview();
+    })();
 
     // ── Init ─────────────────────────────────────────────────────────────────
     buildZapGrid();
