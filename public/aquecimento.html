@@ -110,16 +110,10 @@
             <div class="config-group">
                 <label>🔥 Nível de Aquecimento</label>
                 <select id="warmupLevel" onchange="updateLevelInfo()">
-                    <option value="1">Nível 1 — Muito lento · sem mídia · 3–5 min/msg</option>
-                    <option value="2">Nível 2 — Lento · sem mídia · 2–3 min/msg</option>
-                    <option value="3">Nível 3 — Leve · 5% imagens · 90–120s</option>
-                    <option value="4">Nível 4 — Moderado · 10% imagens · 60–90s</option>
-                    <option value="5" selected>Nível 5 — Normal · 20% imagens · 45–60s</option>
-                    <option value="6">Nível 6 — Ativo · 25% img + 10% áudio · 30–45s</option>
-                    <option value="7">Nível 7 — Intenso · 30% img + 15% áudio · 20–30s</option>
-                    <option value="8">Nível 8 — Agressivo · 40% img + 20% áudio · 15–20s</option>
-                    <option value="9">Nível 9 — Muito agressivo · 50% img + 25% áudio · 10–15s</option>
-                    <option value="10">Nível 10 — Máximo · 60% img + 30% áudio · 8–12s</option>
+                    <option value="1">Nível 1 — Muito lento · 2–3 min entre mensagens</option>
+                    <option value="2" selected>Nível 2 — Lento · 1–1,5 min entre mensagens</option>
+                    <option value="3">Nível 3 — Moderado · 30–60s entre mensagens</option>
+                    <option value="4">Nível 4 — Rápido · 15–30s entre mensagens</option>
                 </select>
             </div>
             <div class="config-group">
@@ -147,16 +141,10 @@
 <script>
     // ── Configuração de níveis ───────────────────────────────────────────────
     const LEVEL_CFG = {
-        1:  { groupSize: 2, minDelayS: 180, imageChance: 0.00, audioChance: 0.00 },
-        2:  { groupSize: 2, minDelayS: 120, imageChance: 0.00, audioChance: 0.00 },
-        3:  { groupSize: 3, minDelayS:  90, imageChance: 0.05, audioChance: 0.00 },
-        4:  { groupSize: 3, minDelayS:  60, imageChance: 0.10, audioChance: 0.00 },
-        5:  { groupSize: 4, minDelayS:  45, imageChance: 0.20, audioChance: 0.00 },
-        6:  { groupSize: 4, minDelayS:  30, imageChance: 0.25, audioChance: 0.10 },
-        7:  { groupSize: 4, minDelayS:  20, imageChance: 0.30, audioChance: 0.15 },
-        8:  { groupSize: 6, minDelayS:  15, imageChance: 0.40, audioChance: 0.20 },
-        9:  { groupSize: 6, minDelayS:  10, imageChance: 0.50, audioChance: 0.25 },
-        10: { groupSize: 8, minDelayS:   8, imageChance: 0.60, audioChance: 0.30 },
+        1: { minDelayS: 120, maxDelayS: 180 },
+        2: { minDelayS:  60, maxDelayS:  90 },
+        3: { minDelayS:  30, maxDelayS:  60 },
+        4: { minDelayS:  15, maxDelayS:  30 },
     };
 
     let _onlineSet = new Set();
@@ -232,11 +220,11 @@
         const cfg      = LEVEL_CFG[level];
         const rotate   = parseInt(document.getElementById('rotateMins').value);
         const selected = document.querySelectorAll('.warmup-cb:checked').length;
-        const groups   = selected > 0 ? Math.floor(selected / cfg.groupSize) : '?';
+        const pairs    = selected > 0 ? Math.floor(selected / 2) : '?';
 
-        let text = `Grupos de <strong>${cfg.groupSize} zaps</strong> · delay <strong>${cfg.minDelayS}s+</strong> · imagens: <strong>${Math.round(cfg.imageChance * 100)}%</strong> · áudio: <strong>${Math.round(cfg.audioChance * 100)}%</strong>`;
-        if (selected) text += ` · ~<strong>${groups}</strong> conversa(s) paralela(s)`;
-        if (rotate > 0) text += ` · <strong>✈️ modo avião a cada ${rotate} min</strong> (novo IP para todos os ZTEs)`;
+        let text = `Modelo <strong>ping-pong</strong> · texto apenas · delay <strong>${cfg.minDelayS}–${cfg.maxDelayS}s</strong> entre mensagens`;
+        if (selected >= 2) text += ` · <strong>${pairs}</strong> par(es) simultâneo(s)`;
+        if (rotate > 0) text += ` · <strong>✈️ rotação de IP a cada ${rotate} min</strong>`;
 
         document.getElementById('levelInfo').innerHTML = text;
     }

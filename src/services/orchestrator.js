@@ -118,6 +118,7 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
         endDatetime,
         dispatchLevel = 2,
         warmupLevel   = 5,
+        testMode      = false,
     } = config;
 
     const level       = DISPATCH_LEVELS[dispatchLevel] || DISPATCH_LEVELS[2];
@@ -155,8 +156,10 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
         }
 
         // ── Aguarda janela de horário ─────────────────────────────────────────
-        await waitUntilWindowOpens(WINDOW_START, WINDOW_END, campaignEnd);
-        if (stopRequested || (campaignEnd && Date.now() >= campaignEnd.getTime())) break;
+        if (!testMode) {
+            await waitUntilWindowOpens(WINDOW_START, WINDOW_END, campaignEnd);
+            if (stopRequested || (campaignEnd && Date.now() >= campaignEnd.getTime())) break;
+        }
 
         // ── Determina grupo ativo ─────────────────────────────────────────────
         const groupLetter = GROUP_ORDER[groupIdx % 3];
@@ -175,10 +178,10 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
         }
         consecutiveSkips = 0;
 
-        // Bloco termina no menor entre: fim do bloco, fim da janela hoje, fim da campanha
+        // Bloco termina no menor entre: fim do bloco, fim da janela hoje (ignorado em testMode), fim da campanha
         const blockEnd = new Date(Math.min(
             Date.now() + blockDurMs,
-            endOfTodayWindow(WINDOW_END).getTime(),
+            testMode ? Infinity : endOfTodayWindow(WINDOW_END).getTime(),
             campaignEnd ? campaignEnd.getTime() : Infinity,
         ));
 
@@ -186,7 +189,7 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
 
         // ── Ondas dentro do bloco ─────────────────────────────────────────────
         while (!stopRequested && Date.now() < blockEnd.getTime()) {
-            if (!isWithinWindow(WINDOW_START, WINDOW_END)) break;
+            if (!testMode && !isWithinWindow(WINDOW_START, WINDOW_END)) break;
 
             const batch = await getPendingMessages(level.batchPerZap * groupZaps.length);
             if (batch.length === 0) break;
@@ -271,7 +274,9 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
         await updateCycleStats(cycleId, 0, 0, 'concluido');
     }
 
-    resetStop();
+    // Não chama resetStop() aqui — stopSignal deve permanecer true até a próxima
+    // campanha iniciar, para que callbacks de consumer ainda em execução não disparem.
+    // resetStop() é chamado no início de runCampaignLoop para cada nova campanha.
     console.log('🏁 [ORCH] Loop encerrado.\n');
 };
 

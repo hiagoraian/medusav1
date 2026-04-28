@@ -96,11 +96,11 @@
 <!-- Modal: Preview do plano de disparo -->
 <div class="modal-overlay" id="modalPreview">
     <div class="modal-box">
-        <h2 style="color:#075e54;">📋 Plano de Disparo</h2>
+        <h2 id="modalPreviewTitle" style="color:#075e54;">📋 Plano de Disparo</h2>
         <table class="preview-table" id="previewTable"></table>
         <div class="btn-group">
             <button class="btn btn-danger" style="flex:0.6;" onclick="closePreview()">Cancelar</button>
-            <button class="btn" onclick="confirmStart()">🚀 Confirmar e Iniciar</button>
+            <button class="btn" id="modalConfirmBtn" onclick="confirmStart()">🚀 Confirmar e Iniciar</button>
         </div>
     </div>
 </div>
@@ -141,7 +141,12 @@
             <button class="btn btn-danger" style="width:auto;padding:10px 20px;font-size:14px;" onclick="clearQueue()">🧹 Limpar Fila</button>
         </div>
 
-        <div id="listaFiles" style="margin-top:14px;"></div>
+        <div id="listaFiles" style="margin-top:14px;max-height:220px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:8px;padding:8px;"></div>
+
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+            <button class="btn btn-secondary" style="width:auto;padding:6px 14px;font-size:12px;" onclick="toggleAllListas(true)">☑ Marcar todas</button>
+            <button class="btn btn-secondary" style="width:auto;padding:6px 14px;font-size:12px;" onclick="toggleAllListas(false)">☐ Desmarcar todas</button>
+        </div>
 
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px;">
             <button class="btn" style="width:auto;padding:10px 24px;font-size:14px;" id="btnProcessar" onclick="processListas()">⚙️ Processar Selecionadas</button>
@@ -197,16 +202,10 @@
             <div class="form-group">
                 <label>🔥 Nível de Aquecimento</label>
                 <select id="warmupLevel">
-                    <option value="1">Nível 1 — Muito lento (só texto, 3-5 min)</option>
-                    <option value="2">Nível 2 — Lento (só texto, 2-3 min)</option>
-                    <option value="3" selected>Nível 3 — Natural (5% imagens, ~2 min)</option>
-                    <option value="4">Nível 4 — Moderado (10% imagens, ~1 min)</option>
-                    <option value="5">Nível 5 — Normal (20% imagens, 45-60s)</option>
-                    <option value="6">Nível 6 — Ativo (25% img + áudio)</option>
-                    <option value="7">Nível 7 — Intenso (30% img + áudio)</option>
-                    <option value="8">Nível 8 — Agressivo</option>
-                    <option value="9">Nível 9 — Muito agressivo</option>
-                    <option value="10">Nível 10 — Máximo</option>
+                    <option value="1">Nível 1 — Muito lento · 2–3 min entre msgs</option>
+                    <option value="2" selected>Nível 2 — Lento · 1–1,5 min entre msgs</option>
+                    <option value="3">Nível 3 — Moderado · 30–60s entre msgs</option>
+                    <option value="4">Nível 4 — Rápido · 15–30s entre msgs</option>
                 </select>
             </div>
         </div>
@@ -235,8 +234,9 @@
 
     <!-- Ações -->
     <div class="btn-group">
-        <button class="btn"            id="btnStart" style="font-size:17px;padding:15px;" onclick="previewCampaign()">📋 Visualizar Plano</button>
-        <button class="btn btn-danger" id="btnStop"  style="font-size:17px;padding:15px;display:none;" onclick="stopCampaign()">🛑 PARAR CAMPANHA</button>
+        <button class="btn"            id="btnStart"    style="font-size:17px;padding:15px;" onclick="previewCampaign()">📋 Visualizar Plano</button>
+        <button class="btn btn-secondary" id="btnTest"  style="font-size:17px;padding:15px;background:#e65100;color:#fff;" onclick="previewTestCampaign()">🧪 Visualizar Teste</button>
+        <button class="btn btn-danger" id="btnStop"     style="font-size:17px;padding:15px;display:none;" onclick="stopCampaign()">🛑 PARAR CAMPANHA</button>
     </div>
 
     <!-- Teste de envio -->
@@ -318,7 +318,7 @@
 
         el.innerHTML = files.map(f => `
             <div class="lista-item">
-                <input type="checkbox" class="lista-cb" value="${f.name}" checked>
+                <input type="checkbox" class="lista-cb" value="${f.name}">
                 <span class="name">📄 ${f.name}</span>
                 <span class="size">${(f.size / 1024).toFixed(0)} KB</span>
                 <button onclick="deleteLista('${f.name}')" title="Remover">🗑️</button>
@@ -337,6 +337,10 @@
         await loadListas();
         btn.disabled = false;
         btn.textContent = '⚙️ Processar Selecionadas';
+    }
+
+    function toggleAllListas(checked) {
+        document.querySelectorAll('.lista-cb').forEach(cb => cb.checked = checked);
     }
 
     async function deleteLista(filename) {
@@ -480,11 +484,13 @@
                 const isActive = status === 'em_andamento';
                 document.getElementById('btnStop').style.display  = isActive ? 'block' : 'none';
                 document.getElementById('btnStart').style.display = isActive ? 'none'  : 'block';
+                document.getElementById('btnTest').style.display  = isActive ? 'none'  : 'block';
             } else {
                 document.getElementById('statStatus').textContent = 'Pronto';
                 document.getElementById('cycleProgress').style.display = 'none';
                 document.getElementById('btnStop').style.display  = 'none';
                 document.getElementById('btnStart').style.display = 'block';
+                document.getElementById('btnTest').style.display  = 'block';
                 currentCycleId = null;
             }
             updatePreviewInfo();
@@ -515,7 +521,7 @@
     }
 
     // ── Preview modal ─────────────────────────────────────────────────────────
-    function previewCampaign() {
+    function previewCampaign(isTest = false) {
         const selectedZaps = Array.from(document.querySelectorAll('.zap-cb:checked')).map(cb => cb.value);
         if (!selectedZaps.length) return alert('⚠️ Selecione pelo menos 1 Zap.');
 
@@ -547,10 +553,11 @@
         const endFormatted   = endStr   ? new Date(endStr).toLocaleString('pt-BR')   : 'Sem prazo definido';
 
         document.getElementById('previewTable').innerHTML = `
+            ${isTest ? '<tr style="background:#fff3e0;"><td colspan="2" style="text-align:center;font-weight:bold;color:#e65100;">🧪 MODO TESTE — sem trava de horário</td></tr>' : ''}
             <tr><td>Zaps selecionados</td><td>${selectedZaps.length} (${groupStr})</td></tr>
             <tr><td>Contatos na fila</td><td>${pending}</td></tr>
             <tr><td>Msgs por zap</td><td>~${msgsPerZap}</td></tr>
-            <tr><td>Janela diária (fixa)</td><td>${WINDOW_START} – ${WINDOW_END}</td></tr>
+            ${isTest ? '' : `<tr><td>Janela diária (fixa)</td><td>${WINDOW_START} – ${WINDOW_END}</td></tr>`}
             <tr><td>Bloco por grupo (A/B/C)</td><td>~${blockMin} min</td></tr>
             <tr><td>Horas disponíveis</td><td>${totalHours}h</td></tr>
             <tr><td>Início da campanha</td><td>${startFormatted}</td></tr>
@@ -560,6 +567,18 @@
             <tr><td>Rotação de IP</td><td>Entre cada bloco A→B→C (escalonada)</td></tr>
         `;
 
+        const titleEl   = document.getElementById('modalPreviewTitle');
+        const confirmEl = document.getElementById('modalConfirmBtn');
+        if (isTest) {
+            titleEl.textContent  = '🧪 Plano de Teste';
+            titleEl.style.color  = '#e65100';
+            confirmEl.textContent = '🧪 Confirmar e Testar';
+        } else {
+            titleEl.textContent  = '📋 Plano de Disparo';
+            titleEl.style.color  = '#075e54';
+            confirmEl.textContent = '🚀 Confirmar e Iniciar';
+        }
+
         const fd = new FormData();
         fd.append('accounts',      JSON.stringify(selectedZaps));
         fd.append('messageText',   document.getElementById('messageText').value);
@@ -568,11 +587,16 @@
         fd.append('endDatetime',   endStr);
         fd.append('dispatchLevel', level);
         fd.append('warmupLevel',   wLevel);
+        if (isTest) fd.append('testMode', 'true');
         const media = document.getElementById('mediaFile').files[0];
         if (media) fd.append('mediaFile', media);
         pendingFormData = fd;
 
         document.getElementById('modalPreview').classList.add('active');
+    }
+
+    function previewTestCampaign() {
+        previewCampaign(true);
     }
 
     function closePreview() {
@@ -582,11 +606,8 @@
 
     async function confirmStart() {
         if (!pendingFormData) return;
+        const isTest = pendingFormData.get('testMode') === 'true';
         document.getElementById('modalPreview').classList.remove('active');
-
-        const btn = document.getElementById('btnStart');
-        btn.textContent = '⏳ Iniciando...';
-        btn.disabled    = true;
 
         try {
             const res  = await fetch('/api/start-campaign', { method: 'POST', body: pendingFormData });
@@ -594,14 +615,14 @@
             if (data.error) {
                 alert('❌ ' + data.error);
             } else {
-                const i = data.info;
-                alert(`✅ ${data.message}\n${i.totalContatos} contatos · ${i.zapsSelecionados} zaps · Nível ${i.dispatchLevel}\nJanela: ${i.janela} · Início: ${i.inicio} · Fim: ${i.fim}`);
+                const i      = data.info;
+                const prefix = isTest ? '🧪 Teste iniciado!' : '✅ ' + data.message;
+                const janela = isTest ? 'Sem trava de horário' : i.janela;
+                alert(`${prefix}\n${i.totalContatos} contatos · ${i.zapsSelecionados} zaps · Nível ${i.dispatchLevel}\nJanela: ${janela} · Início: ${i.inicio} · Fim: ${i.fim}`);
             }
         } catch (_) {
             alert('Erro ao conectar com o servidor.');
         } finally {
-            btn.textContent = '📋 Visualizar Plano';
-            btn.disabled    = false;
             pendingFormData = null;
             updateDashboard();
         }

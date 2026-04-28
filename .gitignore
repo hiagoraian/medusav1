@@ -16,6 +16,10 @@ listas/*
 # Frases de aquecimento (cada máquina tem as suas)
 textAquecimento.txt
 
+# Config de notificação local (JID do grupo varia por máquina)
+notification_config.json
+whitelist_notificacao.txt
+
 # Relatórios de disparo (gerados localmente)
 reports/
 

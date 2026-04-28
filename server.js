@@ -182,10 +182,8 @@ app.post('/webhook/evolution', (req, res) => {
         return;
     }
 
-    // Notificações de resposta/reação/visualização
-    handleWebhookEvent(event).catch(err =>
-        console.warn('⚠️ [WEBHOOK]', err.message)
-    );
+    // Notificações desativadas temporariamente
+    // handleWebhookEvent(event).catch(err => console.warn('⚠️ [WEBHOOK]', err.message));
 });
 
 app.delete('/api/whatsapp/:accountId', async (req, res) => {
@@ -194,7 +192,7 @@ app.delete('/api/whatsapp/:accountId', async (req, res) => {
         return res.status(400).json({ error: 'ID inválido.' });
 
     try {
-        await evolution.logoutInstance(accountId);
+        try { await evolution.logoutInstance(accountId); } catch (_) {}  // ignora se já desconectado
         await evolution.deleteInstance(accountId);
         console.log(`🗑️ [${accountId}] Instância removida da Evolution API.`);
         res.json({ message: `${accountId} desconectado e removido com sucesso.` });
@@ -328,6 +326,7 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
             endDatetime,
             dispatchLevel = '2',
             warmupLevel   = '5',
+            testMode      = 'false',
         } = req.body;
 
         const activeAccountsList = JSON.parse(accounts);
@@ -352,7 +351,7 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
                 zapsSelecionados: activeAccountsList.length,
                 dispatchLevel:    parseInt(dispatchLevel),
                 warmupLevel:      parseInt(warmupLevel),
-                janela:           '08:00–19:45',
+                janela:           testMode === 'true' ? 'Sem trava de horário' : '08:00–19:45',
                 inicio:           startDatetime || 'imediato',
                 fim:              endDatetime   || 'sem limite',
             },
@@ -367,12 +366,15 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
             endDatetime:    endDatetime    || null,
             dispatchLevel:  parseInt(dispatchLevel),
             warmupLevel:    parseInt(warmupLevel),
+            testMode:       testMode === 'true',
         };
 
         (async () => {
             _activeCycleId = cycleId;
             try {
                 await runCampaignLoop(activeAccountsList, campaignConfig, cycleId);
+            } catch (err) {
+                console.error('[CAMPAIGN] Erro não tratado no loop da campanha:', err);
             } finally {
                 _activeCycleId = null;
                 if (req.file) {

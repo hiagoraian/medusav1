@@ -92,6 +92,7 @@ export const startWorkers = async (activeAccounts, campaignConfig) => {
 
     for (const accountId of activeAccounts) {
         const ch    = await workerConnection.createChannel();
+        ch.on('error', (e) => console.error(`[WORKER] Channel error [${accountId}]:`, e.message));
         const queue = `medusa.${accountId}`;
         await ch.assertQueue(queue, { durable: true });
         ch.prefetch(1);
@@ -107,76 +108,80 @@ export const startWorkers = async (activeAccounts, campaignConfig) => {
         const { consumerTag } = await ch.consume(queue, async (msg) => {
             if (!msg) return;
 
-            // Zap já foi marcado como órfão — nunca deveria receber mais msgs,
-            // mas por segurança devolve à fila
-            if (orphaned) {
-                ch.nack(msg, false, true);
-                return;
-            }
-
-            if (stopSignal) {
-                ch.nack(msg, false, true);
-                return;
-            }
-
-            // ── Offset de onda: dorme antes da 1ª mensagem ───────────────────
-            if (isFirstMessage) {
-                isFirstMessage = false;
-                if (offsetMs > 0) {
-                    console.log(`⏱  [${accountId}] Offset de onda: aguardando ${Math.round(offsetMs / 1000)}s`);
-                    await new Promise(r => setTimeout(r, offsetMs));
+            try {
+                // Zap já foi marcado como órfão — nunca deveria receber mais msgs,
+                // mas por segurança devolve à fila
+                if (orphaned) {
+                    ch.nack(msg, false, true);
+                    return;
                 }
-            }
 
-            if (stopSignal) {
-                ch.nack(msg, false, true);
-                return;
-            }
+                if (stopSignal) {
+                    ch.nack(msg, false, true);
+                    return;
+                }
 
-            const task = JSON.parse(msg.content.toString());
+                // ── Offset de onda: dorme antes da 1ª mensagem ───────────────────
+                if (isFirstMessage) {
+                    isFirstMessage = false;
+                    if (offsetMs > 0) {
+                        console.log(`⏱  [${accountId}] Offset de onda: aguardando ${Math.round(offsetMs / 1000)}s`);
+                        await new Promise(r => setTimeout(r, offsetMs));
+                    }
+                }
 
-            // ── Verificação de conectividade ──────────────────────────────────
-            const state = await evolution.getConnectionState(accountId);
-            if (state !== 'open') {
-                offlineStreak++;
-                console.warn(`⚠️  [${accountId}] Offline (${offlineStreak}/${ORPHAN_THRESHOLD}). Falha: ${task.phone}`);
-                await updateMessageStatus(task.messageId, 'falha', accountId, campaignConfig.cycleId, 'Instância offline');
+                if (stopSignal) {
+                    ch.nack(msg, false, true);
+                    return;
+                }
+
+                const task = JSON.parse(msg.content.toString());
+
+                // ── Verificação de conectividade ──────────────────────────────────
+                const state = await evolution.getConnectionState(accountId);
+                if (state !== 'open') {
+                    offlineStreak++;
+                    console.warn(`⚠️  [${accountId}] Offline (${offlineStreak}/${ORPHAN_THRESHOLD}). Falha: ${task.phone}`);
+                    await updateMessageStatus(task.messageId, 'falha', accountId, campaignConfig.cycleId, 'Instância offline');
+                    ch.ack(msg);
+
+                    if (offlineStreak >= ORPHAN_THRESHOLD) {
+                        orphaned = true;
+                        console.error(`🔴 [${accountId}] Declarado órfão. Drenando fila restante...`);
+                        setImmediate(async () => {
+                            try { await ch.cancel(consumerRef.tag); } catch (_) {}
+                            await drainOrphanQueue(ch, queue, campaignConfig.cycleId, accountId, 'Instância offline — órfão');
+                            try { await ch.close(); } catch (_) {}
+                            delete consumerTags[accountId];
+                        });
+                    }
+                    return;
+                }
+
+                // Instância voltou online — zera o streak
+                offlineStreak = 0;
+
+                // ── Delay humano antes do envio ───────────────────────────────────
+                await humanDelay(campaignConfig.minDelayS, campaignConfig.maxDelayS);
+
+                if (stopSignal) {
+                    ch.nack(msg, false, true);
+                    return;
+                }
+
+                console.log(`🚀 [${accountId}] Disparando para ${task.phone}...`);
+                const result = await sendMessage(accountId, task.phone, campaignConfig);
+                await updateMessageStatus(task.messageId, result.status, accountId, campaignConfig.cycleId, result.error || null);
+
+                if      (result.status === 'enviado')  console.log(`✅ [${accountId}] Enviado: ${task.phone}`);
+                else if (result.status === 'invalido') console.log(`🚫 [${accountId}] Inválido: ${task.phone}`);
+                else                                   console.log(`❌ [${accountId}] Falha (${task.phone}): ${result.error}`);
+
                 ch.ack(msg);
-
-                if (offlineStreak >= ORPHAN_THRESHOLD) {
-                    orphaned = true;
-                    console.error(`🔴 [${accountId}] Declarado órfão. Drenando fila restante...`);
-                    // Cancela o consumer e drena assincronamente (fora do handler)
-                    setImmediate(async () => {
-                        try { await ch.cancel(consumerRef.tag); } catch (_) {}
-                        await drainOrphanQueue(ch, queue, campaignConfig.cycleId, accountId, 'Instância offline — órfão');
-                        try { await ch.close(); } catch (_) {}
-                        delete consumerTags[accountId];
-                    });
-                }
-                return;
+            } catch (err) {
+                console.error(`[WORKER] Erro inesperado no consumer [${accountId}]:`, err.message);
+                try { ch.nack(msg, false, false); } catch (_) {}
             }
-
-            // Instância voltou online — zera o streak
-            offlineStreak = 0;
-
-            // ── Delay humano antes do envio ───────────────────────────────────
-            await humanDelay(campaignConfig.minDelayS, campaignConfig.maxDelayS);
-
-            if (stopSignal) {
-                ch.nack(msg, false, true);
-                return;
-            }
-
-            console.log(`🚀 [${accountId}] Disparando para ${task.phone}...`);
-            const result = await sendMessage(accountId, task.phone, campaignConfig);
-            await updateMessageStatus(task.messageId, result.status, accountId, campaignConfig.cycleId, result.error || null);
-
-            if      (result.status === 'enviado')  console.log(`✅ [${accountId}] Enviado: ${task.phone}`);
-            else if (result.status === 'invalido') console.log(`🚫 [${accountId}] Inválido: ${task.phone}`);
-            else                                   console.log(`❌ [${accountId}] Falha (${task.phone}): ${result.error}`);
-
-            ch.ack(msg);
         });
 
         consumerRef.tag          = consumerTag;

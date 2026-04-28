@@ -23,9 +23,9 @@ export const updateMessageStatus = async (id, status, whatsappId, cycleId = null
     await query(
         `UPDATE messages_queue
          SET status = $1, whatsapp_id = $2, cycle_id = $3, error_message = $4,
-             sent_at = CASE WHEN $1 = 'enviado' THEN NOW() ELSE NULL END
+             sent_at = CASE WHEN $6 = 'enviado' THEN NOW() ELSE NULL END
          WHERE id = $5`,
-        [status, whatsappId, cycleId, errorMessage, id]
+        [status, whatsappId, cycleId, errorMessage, id, status]
     );
 };
 
@@ -55,9 +55,9 @@ export const updateCycleStats = async (cycleId, sentCount, failCount, status = '
         `UPDATE dispatch_cycles
          SET sent_count = sent_count + $1, fail_count = fail_count + $2,
              status = $3,
-             end_time = CASE WHEN $3 IN ('concluido', 'interrompido') THEN NOW() ELSE NULL END
-         WHERE id = $4`,
-        [sentCount, failCount, status, cycleId]
+             end_time = CASE WHEN $4 IN ('concluido', 'interrompido') THEN NOW() ELSE NULL END
+         WHERE id = $5`,
+        [sentCount, failCount, status, status, cycleId]
     );
 };
 

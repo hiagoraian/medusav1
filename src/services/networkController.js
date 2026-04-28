@@ -221,18 +221,24 @@ export const rotateZteIP = async (zteId) => {
 
 // Rotaciona IPs de todos os ZTEs de forma escalonada (90s entre cada um).
 export const rotateMobileIPsStaggered = async (zteIds = Object.keys(ZTE_CONFIG)) => {
+    const configured = zteIds.filter(id => ZTE_CONFIG[id]?.serial);
+    if (configured.length === 0) {
+        console.log('⚠️ [ROTATE] Nenhum ZTE com serial configurado. Rotação ignorada.');
+        return;
+    }
+
     if (!await checkAdbAvailability()) {
         console.warn('⚠️ [ROTATE] ADB indisponível. Rotação de IP ignorada.');
         return;
     }
 
-    console.log(`\n🔄 [ROTATE] Iniciando rotação escalonada: ${zteIds.join(', ')}`);
-    for (let i = 0; i < zteIds.length; i++) {
+    console.log(`\n🔄 [ROTATE] Iniciando rotação escalonada: ${configured.join(', ')}`);
+    for (let i = 0; i < configured.length; i++) {
         if (i > 0) {
-            console.log(`⏳ [ROTATE] Aguardando 90s antes de rotar ${zteIds[i]}...`);
+            console.log(`⏳ [ROTATE] Aguardando 90s antes de rotar ${configured[i]}...`);
             await sleep(90000);
         }
-        await rotateZteIP(zteIds[i]);
+        await rotateZteIP(configured[i]);
     }
     console.log('✅ [ROTATE] Rotação de IPs concluída.\n');
 };
