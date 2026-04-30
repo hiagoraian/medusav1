@@ -130,7 +130,7 @@ const waitForWaveToFinish = async (cycleId) => {
 
 /**
  * campaignConfig campos:
- *   messageTemplate, mediaBase64, mediaType, mediaMode — conteúdo da mensagem
+ *   messageTemplate, mediaUrl, mediaFilename, mediaType, mediaMode — conteúdo da mensagem
  *   startDatetime  — ISO string — quando iniciar (null = imediato)
  *   endDatetime    — ISO string — prazo final absoluto (ex: "2026-04-27T12:00")
  *   warmupLevel    — 1|2|3

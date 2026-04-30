@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -140,13 +141,17 @@ app.post('/api/whatsapp/start', async (req, res) => {
     if (!accountId) return res.status(400).json({ error: 'accountId obrigatório.' });
 
     try {
-        // Descobre qual proxy 4G usar (ou null para Wi-Fi)
         const proxyConfig = await getProxyConfigForAccount(accountId);
-        await evolution.createInstance(accountId, proxyConfig);
 
-        // Configura webhook automaticamente para capturar respostas e reações
+        try {
+            await evolution.createInstance(accountId, proxyConfig);
+        } catch (createErr) {
+            // 400 = instância já existe na Evolution API — ignora e segue para pegar QR
+            if (createErr.response?.status !== 400) throw createErr;
+        }
+
         evolution.setWebhook(accountId, `${WEBHOOK_BASE}/webhook/evolution`)
-            .catch(() => {}); // silencioso — não bloqueia o QR code
+            .catch(() => {});
 
         const state = await evolution.getConnectionState(accountId);
         if (state === 'open') {
@@ -174,10 +179,16 @@ app.get('/api/whatsapp/qrcode/:accountId', async (req, res) => {
 app.post('/api/whatsapp/pairing-code/:accountId', async (req, res) => {
     const { accountId } = req.params;
     const { phoneNumber } = req.body;
-    if (!phoneNumber) return res.status(400).json({ error: 'phoneNumber obrigatório.' });
+    if (!phoneNumber) return res.status(400).json({ error: 'Número de telefone obrigatório.' });
     try {
-        await evolution.createInstance(accountId, null, false); // sem QR — fluxo de pairing code
-        const code = await evolution.getPairingCode(accountId, phoneNumber.replace(/\D/g, ''));
+        const state = await evolution.getConnectionState(accountId);
+        if (state === 'open') return res.status(400).json({ error: 'Zap já está conectado. Desconecte antes de usar o código de pareamento.' });
+        // Apaga instância desconectada e recria com número (necessário para gerar pairing code)
+        try { await evolution.deleteInstance(accountId); } catch (_) {}
+        await new Promise(r => setTimeout(r, 2000));
+        await evolution.createInstance(accountId, null, false, phoneNumber);
+        await new Promise(r => setTimeout(r, 5000));
+        const code = await evolution.getPairingCode(accountId);
         if (!code) return res.status(500).json({ error: 'Evolution API não retornou o código. Tente novamente.' });
         res.json({ code });
     } catch (err) {
@@ -235,7 +246,12 @@ app.post('/api/whatsapp/start-bulk', async (req, res) => {
         for (let i = 0; i < accounts.length; i++) {
             try {
                 const proxyConfig = await getProxyConfigForAccount(accounts[i]);
-                await evolution.createInstance(accounts[i], proxyConfig);
+                try {
+                    await evolution.createInstance(accounts[i], proxyConfig);
+                } catch (createErr) {
+                    if (createErr.response?.status !== 400) throw createErr;
+                    // 400 = já existe — continua normalmente
+                }
                 console.log(`[BULK] ${accounts[i]} (${i + 1}/${accounts.length}) iniciado.`);
             } catch (err) {
                 console.error(`[BULK] Erro em ${accounts[i]}:`, err.message);
@@ -371,13 +387,10 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
 
         const cycleId = await createCycle(totalPending);
 
-        const mediaExt    = req.file ? path.extname(req.file.filename).toLowerCase().slice(1) : null;
-        const mediaType   = ['mp4', 'mov', 'avi', 'mkv'].includes(mediaExt) ? 'video' : 'image';
-        // Lê a mídia uma única vez como base64 — Baileys detecta pelo hash de conteúdo
-        // e reutiliza o CDN URL do WhatsApp nas mensagens seguintes do mesmo zap.
-        const mediaBase64 = req.file
-            ? fs.readFileSync(path.join(__dirname, 'uploads', req.file.filename)).toString('base64')
-            : null;
+        const mediaExt      = req.file ? path.extname(req.file.filename).toLowerCase().slice(1) : null;
+        const mediaType     = ['mp4', 'mov', 'avi', 'mkv'].includes(mediaExt) ? 'video' : 'image';
+        const mediaUrl      = req.file ? `${MEDIA_HOST}/uploads/${req.file.filename}` : null;
+        const mediaFilename = req.file ? req.file.filename : null;
 
         res.json({
             message: '🚀 Campanha iniciada!',
@@ -394,7 +407,8 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
 
         const campaignConfig = {
             messageTemplate: messageText   || '',
-            mediaBase64,
+            mediaUrl,
+            mediaFilename,
             mediaType,
             mediaMode:      mediaMode      || 'caption',
             startDatetime:  startDatetime  || null,

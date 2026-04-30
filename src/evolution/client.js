@@ -3,7 +3,7 @@ import axios from 'axios';
 const api = axios.create({
     baseURL: process.env.EVOLUTION_URL || 'http://localhost:8081',
     headers: { apikey: process.env.EVOLUTION_API_KEY || 'medusa-evolution-secret-key' },
-    timeout: 20000,
+    timeout: 40000,
 });
 
 /**
@@ -11,12 +11,13 @@ const api = axios.create({
  * @param {string} instanceName
  * @param {object|null} proxyConfig - { host, port } para rotear via 4G, ou null para Wi-Fi
  */
-export const createInstance = async (instanceName, proxyConfig = null, withQR = true) => {
+export const createInstance = async (instanceName, proxyConfig = null, withQR = true, phoneNumber = null) => {
     const body = {
         instanceName,
         qrcode:      withQR,
         integration: 'WHATSAPP-BAILEYS',
     };
+    if (phoneNumber) body.number = phoneNumber.replace(/\D/g, '');
     if (proxyConfig) {
         body.proxyHost     = proxyConfig.host;
         body.proxyPort     = String(proxyConfig.port);
@@ -31,10 +32,10 @@ export const createInstance = async (instanceName, proxyConfig = null, withQR = 
  * @param {string} phoneNumber - número completo com DDI, ex: 5511999999999
  * @returns {string|null} código de 8 caracteres ou null em caso de erro
  */
-export const getPairingCode = async (instanceName, phoneNumber) => {
+export const getPairingCode = async (instanceName) => {
     try {
-        const { data } = await api.post(`/instance/connect/${instanceName}`, { number: phoneNumber });
-        return data?.code || data?.pairingCode || null;
+        const { data } = await api.get(`/instance/connect/${instanceName}`);
+        return data?.pairingCode || null;
     } catch (_) {
         return null;
     }
@@ -97,12 +98,15 @@ export const sendText = async (instanceName, number, text) => {
  * @param {string} mediatype - 'image' | 'video' | 'audio'
  * @param {string} caption   - Legenda (pode ser vazio)
  */
+const MIMETYPES = { video: 'video/mp4', image: 'image/jpeg', audio: 'audio/mpeg' };
+
 export const sendMedia = async (instanceName, number, mediaUrl, mediatype, caption) => {
     const { data } = await api.post(`/message/sendMedia/${instanceName}`, {
         number,
         mediatype,
-        media: mediaUrl,
-        caption: caption || '',
+        mimetype: MIMETYPES[mediatype] || 'application/octet-stream',
+        media:    mediaUrl,
+        caption:  caption || '',
     });
     return data;
 };

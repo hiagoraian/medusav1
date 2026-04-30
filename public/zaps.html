@@ -57,9 +57,9 @@
             <h2 id="pairingTitle">🔢 Conectar por Código</h2>
             <div id="pairingContent">
                 <p style="margin-bottom:12px;color:#555;font-size:14px;">
-                    Digite o número do chip (com DDI):
+                    Digite o número do chip que será conectado (com DDI):
                 </p>
-                <input id="pairingPhone" type="tel" placeholder="5511999999999"
+                <input id="pairingPhone" type="tel" placeholder="5538999999999"
                     style="width:100%;padding:10px;font-size:16px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;margin-bottom:12px;">
                 <button class="btn" id="btnGetCode" onclick="requestPairingCode()" style="width:100%;">
                     Gerar Código
@@ -279,11 +279,11 @@
 
         async function requestPairingCode() {
             const phone = document.getElementById('pairingPhone').value.replace(/\D/g, '');
-            if (phone.length < 10) return alert('Digite o número completo com DDI (ex: 5511999999999).');
+            if (phone.length < 10) return alert('Digite o número completo com DDI (ex: 5538999999999).');
 
             const btn = document.getElementById('btnGetCode');
             btn.disabled    = true;
-            btn.textContent = '⏳ Aguardando...';
+            btn.textContent = '⏳ Aguardando (~3s)...';
 
             try {
                 const res  = await fetch(`/api/whatsapp/pairing-code/${_pairingAccount}`, {
