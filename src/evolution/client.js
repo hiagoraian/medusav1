@@ -138,4 +138,14 @@ export const sendAudio = async (instanceName, number, audioBase64) => {
     return data;
 };
 
-export default { createInstance, getQRCode, getConnectionState, fetchInstances, logoutInstance, deleteInstance, sendText, sendMedia, setWebhook, fetchGroups, getMediaBase64, sendAudio };
+/** Envia indicador "digitando..." antes de uma mensagem. Falha silenciosa. */
+export const sendTyping = async (instanceName, number, durationMs = 2000) => {
+    try {
+        await api.post(`/chat/updatePresence/${instanceName}`, {
+            number,
+            options: { presence: 'composing', delay: durationMs },
+        });
+    } catch (_) {}
+};
+
+export default { createInstance, getQRCode, getConnectionState, fetchInstances, logoutInstance, deleteInstance, sendText, sendMedia, setWebhook, fetchGroups, getMediaBase64, sendAudio, sendTyping };
