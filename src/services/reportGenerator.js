@@ -17,6 +17,14 @@ const ensureReportsDir = () => fs.mkdirSync(REPORTS_DIR, { recursive: true });
  * reports/invalidos.txt  — um número por linha
  * reports/falhas.txt     — "55119...  |  WA-03  |  motivo"
  */
+export const clearReports = () => {
+    ensureReportsDir();
+    for (const name of ['enviados.txt', 'invalidos.txt', 'falhas.txt']) {
+        const p = path.join(REPORTS_DIR, name);
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+    }
+};
+
 export const generateCampaignReport = async (cycleId) => {
     ensureReportsDir();
 
@@ -46,4 +54,4 @@ export const generateCampaignReport = async (cycleId) => {
     return REPORTS_DIR;
 };
 
-export default { generateCampaignReport };
+export default { generateCampaignReport, clearReports };

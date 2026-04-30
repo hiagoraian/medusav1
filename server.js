@@ -9,7 +9,7 @@ import { initSchema, query }                        from './src/database/postgre
 import { processExcelFiles }                       from './src/services/excelProcessor.js';
 import {
     addContactsToQueue, countPending, createCycle,
-    getDashboardStats, clearQueue, resetCampaign, getInterruptedCycle, updateCycleStats,
+    getDashboardStats, clearQueue, resetCampaign, getInterruptedCycle, updateCycleStats, clearDashboardData,
 } from './src/services/queueService.js';
 import { runCampaignLoop, requestStop }            from './src/services/orchestrator.js';
 import { startWarmup, stopWarmup, startScheduledWarmup, isWarmupRunning, getWarmupState } from './src/services/chipWarmup.js';
@@ -171,6 +171,20 @@ app.get('/api/whatsapp/qrcode/:accountId', async (req, res) => {
     }
 });
 
+app.post('/api/whatsapp/pairing-code/:accountId', async (req, res) => {
+    const { accountId } = req.params;
+    const { phoneNumber } = req.body;
+    if (!phoneNumber) return res.status(400).json({ error: 'phoneNumber obrigatório.' });
+    try {
+        await evolution.createInstance(accountId, null, false); // sem QR — fluxo de pairing code
+        const code = await evolution.getPairingCode(accountId, phoneNumber.replace(/\D/g, ''));
+        if (!code) return res.status(500).json({ error: 'Evolution API não retornou o código. Tente novamente.' });
+        res.json({ code });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post('/webhook/evolution', (req, res) => {
     res.sendStatus(200); // responde imediatamente — nunca atrasa a Evolution API
     const event = req.body;
@@ -267,8 +281,11 @@ app.post('/api/listas/process', async (req, res) => {
         }));
         const result = processExcelFiles(fakeFiles);
         if (result.totalUnicos === 0) return res.status(400).json({ error: 'Nenhum número válido encontrado.' });
-        await addContactsToQueue(result.numeros);
-        res.json({ message: 'Listas processadas!', totalRecebidos: result.totalRecebidos, totalUnicos: result.totalUnicos });
+        const { added, skipped } = await addContactsToQueue(result.numeros);
+        const msg = skipped > 0
+            ? `${added} adicionados. ${skipped} já estavam na fila e foram ignorados.`
+            : `${added} números adicionados à fila.`;
+        res.json({ message: msg, totalRecebidos: result.totalRecebidos, totalUnicos: result.totalUnicos, added, skipped });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -279,12 +296,11 @@ app.post('/api/upload-lists', uploadExcel.array('excelFiles'), async (req, res) 
         if (!req.files?.length) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
         const result = processExcelFiles(req.files);
         if (result.totalUnicos === 0) return res.status(400).json({ error: 'Nenhum número válido encontrado.' });
-        await addContactsToQueue(result.numeros);
-        res.json({
-            message: 'Listas processadas!',
-            totalRecebidos: result.totalRecebidos,
-            totalUnicos:    result.totalUnicos,
-        });
+        const { added, skipped } = await addContactsToQueue(result.numeros);
+        const msg = skipped > 0
+            ? `${added} adicionados. ${skipped} já estavam na fila e foram ignorados.`
+            : `${added} números adicionados à fila.`;
+        res.json({ message: msg, totalRecebidos: result.totalRecebidos, totalUnicos: result.totalUnicos, added, skipped });
     } catch (err) {
         res.status(500).json({ error: 'Erro ao processar arquivos.' });
     }
@@ -316,6 +332,14 @@ app.post('/api/suspend-campaign', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.post('/api/clear-dashboard', async (req, res) => {
+    try {
+        requestStop();
+        await clearDashboardData();
+        res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 /**
  * POST /api/start-campaign
  * Body (multipart/form-data):
@@ -324,8 +348,7 @@ app.post('/api/suspend-campaign', async (req, res) => {
  *   mediaMode      — "caption" | "separate"
  *   startDatetime  — ISO datetime local — quando iniciar (null = imediato)
  *   endDatetime    — ISO datetime local — prazo final absoluto
- *   dispatchLevel  — 1 | 2 | 3
- *   warmupLevel    — 1–10
+ *   warmupLevel    — 1 | 2 | 3
  *   mediaFile      — arquivo de mídia (opcional)
  */
 app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res) => {
@@ -334,9 +357,8 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
             accounts, messageText, mediaMode,
             startDatetime,
             endDatetime,
-            dispatchLevel = '2',
-            warmupLevel   = '5',
-            testMode      = 'false',
+            warmupLevel = '2',
+            testMode    = 'false',
         } = req.body;
 
         const activeAccountsList = JSON.parse(accounts);
@@ -349,9 +371,13 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
 
         const cycleId = await createCycle(totalPending);
 
-        const mediaUrl  = req.file ? `${MEDIA_HOST}/uploads/${req.file.filename}` : null;
-        const mediaExt  = req.file ? path.extname(req.file.filename).toLowerCase().slice(1) : null;
-        const mediaType = ['mp4', 'mov', 'avi', 'mkv'].includes(mediaExt) ? 'video' : 'image';
+        const mediaExt    = req.file ? path.extname(req.file.filename).toLowerCase().slice(1) : null;
+        const mediaType   = ['mp4', 'mov', 'avi', 'mkv'].includes(mediaExt) ? 'video' : 'image';
+        // Lê a mídia uma única vez como base64 — Baileys detecta pelo hash de conteúdo
+        // e reutiliza o CDN URL do WhatsApp nas mensagens seguintes do mesmo zap.
+        const mediaBase64 = req.file
+            ? fs.readFileSync(path.join(__dirname, 'uploads', req.file.filename)).toString('base64')
+            : null;
 
         res.json({
             message: '🚀 Campanha iniciada!',
@@ -359,7 +385,6 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
             info: {
                 totalContatos:    totalPending,
                 zapsSelecionados: activeAccountsList.length,
-                dispatchLevel:    parseInt(dispatchLevel),
                 warmupLevel:      parseInt(warmupLevel),
                 janela:           testMode === 'true' ? 'Sem trava de horário' : '08:00–19:45',
                 inicio:           startDatetime || 'imediato',
@@ -369,13 +394,12 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
 
         const campaignConfig = {
             messageTemplate: messageText   || '',
-            mediaUrl,
+            mediaBase64,
             mediaType,
             mediaMode:      mediaMode      || 'caption',
             startDatetime:  startDatetime  || null,
             endDatetime:    endDatetime    || null,
-            dispatchLevel:  parseInt(dispatchLevel),
-            warmupLevel:    parseInt(warmupLevel),
+            warmupLevel: parseInt(warmupLevel),
             testMode:       testMode === 'true',
         };
 

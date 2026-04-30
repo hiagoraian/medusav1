@@ -11,10 +11,10 @@ const api = axios.create({
  * @param {string} instanceName
  * @param {object|null} proxyConfig - { host, port } para rotear via 4G, ou null para Wi-Fi
  */
-export const createInstance = async (instanceName, proxyConfig = null) => {
+export const createInstance = async (instanceName, proxyConfig = null, withQR = true) => {
     const body = {
         instanceName,
-        qrcode: true,
+        qrcode:      withQR,
         integration: 'WHATSAPP-BAILEYS',
     };
     if (proxyConfig) {
@@ -24,6 +24,20 @@ export const createInstance = async (instanceName, proxyConfig = null) => {
     }
     const { data } = await api.post('/instance/create', body);
     return data;
+};
+
+/**
+ * Gera pairing code para conectar sem QR.
+ * @param {string} phoneNumber - número completo com DDI, ex: 5511999999999
+ * @returns {string|null} código de 8 caracteres ou null em caso de erro
+ */
+export const getPairingCode = async (instanceName, phoneNumber) => {
+    try {
+        const { data } = await api.post(`/instance/connect/${instanceName}`, { number: phoneNumber });
+        return data?.code || data?.pairingCode || null;
+    } catch (_) {
+        return null;
+    }
 };
 
 /** Retorna o QR code base64 da instância, ou null se já conectada. */
@@ -148,4 +162,4 @@ export const sendTyping = async (instanceName, number, durationMs = 2000) => {
     } catch (_) {}
 };
 
-export default { createInstance, getQRCode, getConnectionState, fetchInstances, logoutInstance, deleteInstance, sendText, sendMedia, setWebhook, fetchGroups, getMediaBase64, sendAudio, sendTyping };
+export default { createInstance, getPairingCode, getQRCode, getConnectionState, fetchInstances, logoutInstance, deleteInstance, sendText, sendMedia, setWebhook, fetchGroups, getMediaBase64, sendAudio, sendTyping };

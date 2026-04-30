@@ -6,48 +6,36 @@ import { publishBulk, purgeQueues }                                          fro
 import { startWorkers, stopWorkers, requestWorkerStop, resetWorkerStop }     from '../queue/worker.js';
 import { rotateMobileIPsStaggered, getZapsByGroup, getActiveZteIds }         from './networkController.js';
 import { runWarmupFor }                                                      from './chipWarmup.js';
-import { generateCampaignReport }                                            from './reportGenerator.js';
+import { generateCampaignReport, clearReports }                              from './reportGenerator.js';
 import * as evolution                                                        from '../evolution/client.js';
-import { waitForAck }                                                        from './ackWaiter.js';
 
-// ── Configuração de nível de disparo ─────────────────────────────────────────
-const DISPATCH_LEVELS = {
-    1: { batchPerZap: 3, minDelayS: 90,  maxDelayS: 150 },
-    2: { batchPerZap: 5, minDelayS: 60,  maxDelayS:  90 },
-    3: { batchPerZap: 8, minDelayS: 45,  maxDelayS:  70 },
-};
+const SLOT_DURATION_MS = 18 * 60 * 1000;  // 18 min por slot de grupo
+const TRANSITION_MS    =  5 * 60 * 1000;  // transição/pré-aquecimento entre grupos
+const MSG_MIN_DELAY_S  = 45;              // delay mínimo entre msgs no worker
+const MSG_MAX_DELAY_S  = 90;              // delay máximo entre msgs no worker
 
-const SUBGROUP_SIZE       = 4;    // zaps por sub-grupo dentro de uma onda
-const WARMUP_PAUSE_S      = 300;  // segundos de aquecimento entre ondas (5 min)
-const GROUP_ORDER         = ['A', 'B', 'C'];
-const HEALTH_CHECK_NUMBER = process.env.HEALTH_CHECK_NUMBER || '5538999852426';
+const SUBGROUP_SIZE = 4;
+const GROUP_ORDER   = ['A', 'B', 'C'];
 
 // ── Health check pré-disparo ──────────────────────────────────────────────────
-// Envia mensagem de teste para HEALTH_CHECK_NUMBER antes de cada onda.
-// Zaps que falham são removidos daquela onda.
+// Verifica estado de conexão de cada zap antes de cada onda.
+// Zaps desconectados são removidos daquela onda sem enviar mensagens.
 const preflightCheck = async (accounts) => {
     const healthy = [];
     const sick    = [];
 
     await Promise.allSettled(accounts.map(async (id) => {
         try {
-            const res   = await evolution.sendText(id, HEALTH_CHECK_NUMBER, '🟢 Medusa — verificação pré-disparo');
-            const keyId = res?.key?.id;
-
-            if (keyId) {
-                // Aguarda confirmação do servidor WA (SERVER_ACK) em até 8s
-                const acked = await waitForAck(keyId, 8000);
-                if (!acked) {
-                    console.warn(`🔴 [PREFLIGHT] ${id} suspenso — mensagem enviada mas sem confirmação WA (ghost send)`);
-                    sick.push(id);
-                    return;
-                }
+            const state = await evolution.getConnectionState(id);
+            if (state === 'open') {
+                console.log(`✅ [PREFLIGHT] ${id} OK`);
+                healthy.push(id);
+            } else {
+                console.warn(`🔴 [PREFLIGHT] ${id} suspenso — estado: ${state}`);
+                sick.push(id);
             }
-
-            console.log(`✅ [PREFLIGHT] ${id} OK`);
-            healthy.push(id);
         } catch (err) {
-            console.warn(`🔴 [PREFLIGHT] ${id} suspenso — ${err.response?.data?.message || err.message}`);
+            console.warn(`🔴 [PREFLIGHT] ${id} suspenso — ${err.message}`);
             sick.push(id);
         }
     }));
@@ -142,30 +130,25 @@ const waitForWaveToFinish = async (cycleId) => {
 
 /**
  * campaignConfig campos:
- *   messageTemplate, mediaUrl, mediaType, mediaMode — conteúdo da mensagem
+ *   messageTemplate, mediaBase64, mediaType, mediaMode — conteúdo da mensagem
  *   startDatetime  — ISO string — quando iniciar (null = imediato)
  *   endDatetime    — ISO string — prazo final absoluto (ex: "2026-04-27T12:00")
- *   dispatchLevel  — 1|2|3
- *   warmupLevel    — 1–10
+ *   warmupLevel    — 1|2|3
  *
  * Janela diária fixada em WINDOW_START–WINDOW_END (08:00–19:45).
  * Rotação A→B→C divide a janela em 3 blocos iguais (~3h55 cada).
  */
 export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
+    clearReports();
+
     const {
         startDatetime,
         endDatetime,
-        dispatchLevel = 2,
-        warmupLevel   = 5,
-        testMode      = false,
+        warmupLevel = 2,
+        testMode    = false,
     } = config;
 
-    const level       = DISPATCH_LEVELS[dispatchLevel] || DISPATCH_LEVELS[2];
     const campaignEnd = endDatetime ? new Date(endDatetime) : null;
-
-    // Duração de cada bloco = 1/3 da janela diária
-    const windowDurMs = (parseHHMM(WINDOW_END) - parseHHMM(WINDOW_START)) * 60_000;
-    const blockDurMs  = Math.floor(windowDurMs / 3);
 
     resetStop();
 
@@ -178,8 +161,8 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
     let consecutiveSkips = 0;
 
     console.log(`\n🚀 [ORCH] Campanha iniciada`);
-    console.log(`   Zaps: ${activeAccounts.length} | Nível: ${dispatchLevel} | Aquecimento: ${warmupLevel}`);
-    console.log(`   Janela: ${WINDOW_START}–${WINDOW_END} | Bloco: ${Math.round(blockDurMs / 60000)} min | Fim: ${campaignEnd ? campaignEnd.toLocaleString('pt-BR') : 'sem limite'}`);
+    console.log(`   Zaps: ${activeAccounts.length} | Slot: ${SLOT_DURATION_MS / 60000} min | Aquecimento: ${warmupLevel}`);
+    console.log(`   Janela: ${WINDOW_START}–${WINDOW_END} | Fim: ${campaignEnd ? campaignEnd.toLocaleString('pt-BR') : 'sem limite'}`);
 
     while (!stopRequested) {
         // ── Fim por data ──────────────────────────────────────────────────────
@@ -217,9 +200,9 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
         }
         consecutiveSkips = 0;
 
-        // Bloco termina no menor entre: fim do bloco, fim da janela hoje (ignorado em testMode), fim da campanha
+        // Slot de 18 min, limitado pelo fim da janela/campanha
         const blockEnd = new Date(Math.min(
-            Date.now() + blockDurMs,
+            Date.now() + SLOT_DURATION_MS,
             testMode ? Infinity : endOfTodayWindow(WINDOW_END).getTime(),
             campaignEnd ? campaignEnd.getTime() : Infinity,
         ));
@@ -241,24 +224,30 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
                 console.warn(`⚠️ [ORCH] Continuando com ${healthyZaps.length}/${groupZaps.length} zap(s) saudáveis.`);
             }
 
-            const batch = await getPendingMessages(level.batchPerZap * healthyZaps.length);
+            // Calcula dinamicamente quantas msgs por zap neste slot
+            const totalPending  = await countPending();
+            const timeLeftMs    = Math.max(SLOT_DURATION_MS, (campaignEnd || endOfTodayWindow(WINDOW_END)).getTime() - Date.now());
+            const slotsLeft     = Math.max(1, Math.round(timeLeftMs / (SLOT_DURATION_MS + TRANSITION_MS)));
+            const batchPerZap   = Math.max(1, Math.ceil(totalPending / (healthyZaps.length * slotsLeft)));
+
+            const batch = await getPendingMessages(batchPerZap * healthyZaps.length);
             if (batch.length === 0) break;
 
             await assignMessagesToCycle(batch.map(r => r.id), cycleId);
 
-            const offsets = buildSubGroupOffsets(healthyZaps, level.minDelayS * 1_000);
+            const offsets = buildSubGroupOffsets(healthyZaps, MSG_MIN_DELAY_S * 1_000);
             const numSubs = Math.ceil(healthyZaps.length / SUBGROUP_SIZE);
             waveCount++;
 
-            console.log(`  🌊 Onda ${waveCount} [Grupo ${groupLetter}] — ${batch.length} msgs — ${healthyZaps.length} zap(s) — ${numSubs} sub-grupo(s)`);
+            console.log(`  🌊 Onda ${waveCount} [Grupo ${groupLetter}] — ${batch.length} msgs — ${healthyZaps.length} zap(s) — ${batchPerZap}/zap — slots restantes ~${slotsLeft}`);
 
             const waveStartMs = Date.now();
             await publishBulk(batch, healthyZaps);
             await startWorkers(healthyZaps, {
                 ...config,
                 cycleId,
-                minDelayS:       level.minDelayS,
-                maxDelayS:       level.maxDelayS,
+                minDelayS:       MSG_MIN_DELAY_S,
+                maxDelayS:       MSG_MAX_DELAY_S,
                 subGroupOffsets: offsets,
             });
             await waitForWaveToFinish(cycleId);
@@ -271,7 +260,7 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
             const remaining  = await countPending();
             if (remaining === 0) break;
 
-            let pauseSec = WARMUP_PAUSE_S;
+            let pauseSec = TRANSITION_MS / 1000;
             if (campaignEnd) {
                 const timeLeftMs   = campaignEnd.getTime() - Date.now();
                 const wavesLeft    = Math.max(1, Math.ceil(remaining / batch.length));

@@ -1,10 +1,20 @@
 import { query } from '../database/postgres.js';
 
 export const addContactsToQueue = async (numbers) => {
-    if (numbers.length === 0) return 0;
-    const values = numbers.map((_, i) => `($${i + 1}, 'pendente')`).join(', ');
-    await query(`INSERT INTO messages_queue (phone_number, status) VALUES ${values}`, numbers);
-    return numbers.length;
+    if (numbers.length === 0) return { added: 0, skipped: 0 };
+
+    const { rows: existing } = await query(
+        `SELECT phone_number FROM messages_queue WHERE status = 'pendente'`
+    );
+    const inQueue = new Set(existing.map(r => r.phone_number));
+    const unique  = numbers.filter(n => !inQueue.has(n));
+
+    if (unique.length > 0) {
+        const values = unique.map((_, i) => `($${i + 1}, 'pendente')`).join(', ');
+        await query(`INSERT INTO messages_queue (phone_number, status) VALUES ${values}`, unique);
+    }
+
+    return { added: unique.length, skipped: numbers.length - unique.length };
 };
 
 export const clearQueue = async () => {
@@ -66,9 +76,9 @@ export const getDashboardStats = async () => {
         `SELECT COUNT(*) AS total FROM messages_queue WHERE status = 'pendente'`
     );
 
-    // Retorna o ciclo mais recente independente do status (inclui 'concluido')
     const { rows: cycleRows } = await query(
-        `SELECT id, status, total_messages FROM dispatch_cycles ORDER BY id DESC LIMIT 1`
+        `SELECT id, status, total_messages FROM dispatch_cycles
+         WHERE status != 'cancelado' ORDER BY id DESC LIMIT 1`
     );
     const cycle = cycleRows[0] || null;
 
@@ -126,8 +136,23 @@ export const resetCampaign = async (cycleId) => {
     await query(`DELETE FROM messages_queue WHERE status = 'pendente'`);
 };
 
+export const clearDashboardData = async () => {
+    const { rows } = await query(
+        `SELECT id FROM dispatch_cycles ORDER BY id DESC LIMIT 1`
+    );
+    if (rows[0]) {
+        const cycleId = rows[0].id;
+        await query(`DELETE FROM messages_queue WHERE cycle_id = $1`, [cycleId]);
+        await query(
+            `UPDATE dispatch_cycles SET status = 'cancelado', end_time = NOW() WHERE id = $1`,
+            [cycleId]
+        );
+    }
+    await query(`DELETE FROM messages_queue WHERE status = 'pendente'`);
+};
+
 export default {
     addContactsToQueue, clearQueue, getPendingMessages, updateMessageStatus,
     countPending, countPendingInCycle, assignMessagesToCycle,
-    createCycle, updateCycleStats, getDashboardStats, getInterruptedCycle, resetCampaign,
+    createCycle, updateCycleStats, getDashboardStats, getInterruptedCycle, resetCampaign, clearDashboardData,
 };

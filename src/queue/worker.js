@@ -26,7 +26,7 @@ export const isInvalidNumber = (err) => {
 // ── Envio de mensagem ─────────────────────────────────────────────────────────
 
 const sendMessage = async (accountId, phone, config) => {
-    const { messageTemplate, mediaUrl, mediaType, mediaMode } = config;
+    const { messageTemplate, mediaBase64, mediaType, mediaMode } = config;
     const normalizedPhone = String(phone).replace(/\D/g, '');
 
     if (normalizedPhone.length < 10) {
@@ -37,14 +37,14 @@ const sendMessage = async (accountId, phone, config) => {
 
     try {
         let res;
-        if (!mediaUrl) {
+        if (!mediaBase64) {
             res = await evolution.sendText(accountId, normalizedPhone, finalText);
         } else if (mediaMode === 'caption') {
-            res = await evolution.sendMedia(accountId, normalizedPhone, mediaUrl, mediaType, finalText);
+            res = await evolution.sendMedia(accountId, normalizedPhone, mediaBase64, mediaType, finalText);
         } else {
             if (finalText) await evolution.sendText(accountId, normalizedPhone, finalText);
             await humanDelay(2, 4);
-            res = await evolution.sendMedia(accountId, normalizedPhone, mediaUrl, mediaType, '');
+            res = await evolution.sendMedia(accountId, normalizedPhone, mediaBase64, mediaType, '');
         }
         const keyId = res?.key?.id || null;
         return { status: 'enviado', keyId };
@@ -83,7 +83,7 @@ const drainOrphanQueue = async (ch, queue, cycleId, accountId, reason) => {
 
 /**
  * campaignConfig:
- *   cycleId, messageTemplate, mediaUrl, mediaType, mediaMode,
+ *   cycleId, messageTemplate, mediaBase64, mediaType, mediaMode,
  *   minDelayS, maxDelayS,
  *   subGroupOffsets: { [accountId]: milliseconds } — atraso antes da 1ª mensagem
  */

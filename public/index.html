@@ -117,18 +117,25 @@
     <div class="dashboard">
         <div class="stat-card"><h3>Pendentes</h3><p id="statPending">0</p></div>
         <div class="stat-card"><h3>Enviados</h3><p id="statSent">0</p></div>
-        <div class="stat-card"><h3>Inválidos</h3><p id="statInvalid" style="color:#e65100;">0</p></div>
         <div class="stat-card"><h3>Falhas Técnicas</h3><p id="statFailed" style="color:#d32f2f;">0</p></div>
-        <div class="stat-card"><h3>Status</h3><p id="statStatus" style="font-size:16px;">Pronto</p></div>
+        <div class="stat-card"><h3>Situação</h3><p id="statStatus" style="font-size:16px;">Pronto</p></div>
+    </div>
+    <div style="text-align:right;margin-top:-10px;margin-bottom:10px;">
+        <button class="btn btn-gray btn-sm" onclick="clearDashboard()">🧹 Limpar Dashboard</button>
     </div>
 
     <div id="cycleProgress" style="display:none;" class="section">
         <p id="progressText" style="margin:0 0 6px; font-weight:bold;">Progresso: 0/0</p>
         <div class="progress-container"><div class="progress-bar" id="progressBar"></div></div>
-        <div class="btn-group" style="margin-top:14px;">
+    </div>
+
+    <!-- Relatórios -->
+    <div class="section" style="padding:14px 20px;">
+        <h2 style="margin-bottom:10px;">📄 Relatórios</h2>
+        <div class="btn-group" style="margin-top:0;">
             <button class="btn btn-secondary btn-sm" onclick="downloadReport('enviados')">✅ Enviados.txt</button>
             <button class="btn btn-secondary btn-sm" onclick="downloadReport('invalidos')">🚫 Inválidos.txt</button>
-            <button class="btn btn-danger    btn-sm" onclick="downloadReport('falhas')">❌ Falhas.txt</button>
+            <button class="btn btn-danger    btn-sm" onclick="downloadReport('falhas')">❌ Falhas Técnicas.txt</button>
         </div>
     </div>
 
@@ -161,13 +168,15 @@
     <!-- 2. Zaps -->
     <div class="section">
         <h2>2. Seleção de Zaps</h2>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;align-items:center;">
             <button class="btn btn-gray btn-sm" onclick="selectZapGroup('all')">Todos</button>
             <button class="btn btn-sm" style="background:#1565c0;" onclick="selectZapGroup('A')">Grupo A</button>
             <button class="btn btn-sm" style="background:#6a1b9a;" onclick="selectZapGroup('B')">Grupo B</button>
             <button class="btn btn-sm" style="background:#e65100;" onclick="selectZapGroup('C')">Grupo C</button>
             <button class="btn btn-gray btn-sm" style="background:#aaa;" onclick="selectZapGroup('none')">Limpar</button>
+            <button class="btn btn-gray btn-sm" id="btnVerifyZaps" onclick="verifyZapsNow()" style="margin-left:auto;">🔄 Verificar Agora</button>
         </div>
+        <div id="zapSummary" style="font-size:13px;color:#555;margin:8px 0 4px;min-height:18px;"></div>
         <div class="grid-checkboxes" id="accountsGrid"></div>
     </div>
 
@@ -189,25 +198,16 @@
         </div>
 
         <div style="background:#e3f2fd;border-left:4px solid #1565c0;border-radius:5px;padding:10px 14px;margin-top:10px;font-size:13px;color:#1565c0;">
-            ⏰ <b>Janela fixa:</b> 08:00–19:45 · Rotação A→B→C divide a janela em 3 blocos iguais (~3h55 cada)
+            ⏰ <b>Janela fixa:</b> 08:00–19:45 · Rotação A→B→C com slots de <b>18 min</b> cada · Ritmo calculado automaticamente
         </div>
 
         <div class="row" style="margin-top:15px;">
             <div class="form-group">
-                <label>⚡ Nível de Disparo</label>
-                <select id="dispatchLevel" onchange="updatePreviewInfo()">
-                    <option value="1">Nível 1 — Lento (3 msgs/zap/onda · 90-150s)</option>
-                    <option value="2" selected>Nível 2 — Médio (5 msgs/zap/onda · 60-90s)</option>
-                    <option value="3">Nível 3 — Rápido (8 msgs/zap/onda · 45-70s)</option>
-                </select>
-            </div>
-            <div class="form-group">
                 <label>🔥 Nível de Aquecimento</label>
                 <select id="warmupLevel">
-                    <option value="1">Nível 1 — Muito lento · 2–3 min entre msgs</option>
-                    <option value="2" selected>Nível 2 — Lento · 1–1,5 min entre msgs</option>
-                    <option value="3">Nível 3 — Moderado · 30–60s entre msgs</option>
-                    <option value="4">Nível 4 — Rápido · 15–30s entre msgs</option>
+                    <option value="1">Nível 1 — Lento · 3–8 min entre msgs</option>
+                    <option value="2" selected>Nível 2 — Moderado · 2–4 min entre msgs</option>
+                    <option value="3">Nível 3 — Rápido · 1–2 min entre msgs</option>
                 </select>
             </div>
         </div>
@@ -263,13 +263,10 @@
 
 <script>
     // ── Constantes ───────────────────────────────────────────────────────────
-    const DISPATCH_LEVELS_CFG = {
-        1: { batchPerZap: 3, minDelayS: 90,  maxDelayS: 150 },
-        2: { batchPerZap: 5, minDelayS: 60,  maxDelayS:  90 },
-        3: { batchPerZap: 8, minDelayS: 45,  maxDelayS:  70 },
-    };
-    const WINDOW_START = '08:00';
-    const WINDOW_END   = '19:45';
+    const WINDOW_START   = '08:00';
+    const WINDOW_END     = '19:45';
+    const SLOT_MIN       = 18;   // minutos por slot de grupo
+    const TRANSITION_MIN = 5;    // transição entre grupos
 
     let currentCycleId  = null;
     let pendingFormData = null;
@@ -277,6 +274,7 @@
     // ── Grid de Zaps (48) ────────────────────────────────────────────────────
     const accountsGrid = document.getElementById('accountsGrid');
     const testSelect   = document.getElementById('testAccountId');
+    const zapStatusMap = {};   // accountId → true/false (connected)
 
     function getZapGroup(i) {
         const pos = (i - 1) % 12;
@@ -290,12 +288,35 @@
         const group = getZapGroup(i);
         accountsGrid.innerHTML += `
             <label>
-                <input type="checkbox" class="zap-cb" value="${id}" data-group="${group}">
+                <input type="checkbox" class="zap-cb" value="${id}" data-group="${group}" onchange="updateZapSummary()">
                 <span>${id}</span>
                 <span class="zap-dot offline" id="dot-${id}"></span>
                 <span class="group-tag group-${group.toLowerCase()}">${group}</span>
             </label>`;
         testSelect.innerHTML += `<option value="${id}">${id}</option>`;
+        zapStatusMap[id] = false;
+    }
+
+    function updateZapSummary() {
+        const cbs       = [...document.querySelectorAll('.zap-cb')];
+        const selected  = cbs.filter(cb => cb.checked).map(cb => cb.value);
+        const online    = selected.filter(id => zapStatusMap[id]);
+        const offline   = selected.filter(id => !zapStatusMap[id]);
+        const el        = document.getElementById('zapSummary');
+        if (selected.length === 0) { el.textContent = ''; return; }
+        const offTxt = offline.length > 0
+            ? ` · <span style="color:#d32f2f;font-weight:600;">${offline.length} offline ⚠️</span>`
+            : '';
+        el.innerHTML = `<b>${selected.length}</b> selecionados · <span style="color:#25D366;font-weight:600;">${online.length} online</span>${offTxt}`;
+    }
+
+    async function verifyZapsNow() {
+        const btn = document.getElementById('btnVerifyZaps');
+        btn.textContent = '⏳ Verificando...';
+        btn.disabled    = true;
+        await refreshZapStatus();
+        btn.textContent = '🔄 Verificar Agora';
+        btn.disabled    = false;
     }
 
     function selectZapGroup(filter) {
@@ -304,6 +325,7 @@
             else if (filter === 'none') cb.checked = false;
             else                        cb.checked = (cb.dataset.group === filter);
         });
+        updateZapSummary();
         updatePreviewInfo();
     }
 
@@ -426,32 +448,30 @@
         return Math.round(totalMin / 60 * 10) / 10;
     }
 
-    // ── Atualiza info de preview / level ─────────────────────────────────────
+    // ── Atualiza info de preview ──────────────────────────────────────────────
     function updatePreviewInfo() {
-        const level    = parseInt(document.getElementById('dispatchLevel').value);
-        const cfg      = DISPATCH_LEVELS_CFG[level];
         const numZaps  = document.querySelectorAll('.zap-cb:checked').length;
         const pending  = parseInt(document.getElementById('statPending').textContent) || 0;
+        const startStr = document.getElementById('startDatetime').value;
         const endStr   = document.getElementById('endDatetime').value;
-        const blockMin = Math.round((parseHHMM(WINDOW_END) - parseHHMM(WINDOW_START)) / 3);
-        const msgsWave = numZaps ? cfg.batchPerZap * numZaps : '?';
 
-        let info = `<b>Nível ${level}:</b> ${cfg.batchPerZap} msgs/zap/onda · delay ${cfg.minDelayS}–${cfg.maxDelayS}s · ${msgsWave} msgs/onda`;
-        info    += ` · Bloco por grupo: <b>${blockMin} min</b> · Rotação A→B→C com IP novo entre blocos`;
+        let info = `Slot por grupo: <b>${SLOT_MIN} min</b> · Rotação A→B→C · Ritmo calculado automaticamente pelo tempo disponível`;
 
         if (endStr && numZaps && pending) {
-            const startStr   = document.getElementById('startDatetime').value;
-            const totalHours = calcAvailableHours(endStr, startStr);
-            const msgsPerZap = Math.ceil(pending / numZaps);
-            const numDays    = Math.ceil(totalHours / (parseHHMM(WINDOW_END) - parseHHMM(WINDOW_START)) * 60);
-            const msgsPerDay = numDays > 0 ? Math.ceil(msgsPerZap / Math.max(1, numDays)) : msgsPerZap;
-            info += `<br>📊 <b>${pending}</b> contatos · <b>${numZaps}</b> zaps · <b>~${msgsPerZap}</b> msgs/zap · <b>~${msgsPerDay}</b>/dia · <b>${totalHours}h</b> disponíveis`;
+            const totalHours    = calcAvailableHours(endStr, startStr);
+            const totalMin      = totalHours * 60;
+            const cycleMin      = SLOT_MIN * 3 + TRANSITION_MIN * 2;
+            const slotsPerGroup = Math.max(1, Math.floor(totalMin / cycleMin));
+            const totalSlots    = slotsPerGroup * 3;
+            const msgsPerSlot   = Math.ceil(pending / totalSlots);
+            const msgsPerZap    = Math.ceil(pending / numZaps);
+            info += `<br>📊 <b>${pending}</b> contatos · <b>${numZaps}</b> zaps · <b>~${msgsPerZap}</b> msgs/zap`;
+            info += ` · <b>~${msgsPerSlot}</b> msgs/slot · <b>~${slotsPerGroup}</b> ciclos/grupo · <b>${totalHours}h</b> disponíveis`;
         }
 
         document.getElementById('levelInfo').innerHTML = info;
     }
 
-    document.getElementById('dispatchLevel').addEventListener('change', updatePreviewInfo);
     document.querySelectorAll('.zap-cb').forEach(cb => cb.addEventListener('change', updatePreviewInfo));
 
     // ── Zap status ────────────────────────────────────────────────────────────
@@ -459,9 +479,11 @@
         try {
             const data = await (await fetch('/api/zaps-status')).json();
             data.forEach(zap => {
+                zapStatusMap[zap.accountId] = zap.connected;
                 const dot = document.getElementById(`dot-${zap.accountId}`);
                 if (dot) dot.className = 'zap-dot ' + (zap.connected ? 'online' : 'offline');
             });
+            updateZapSummary();
             updatePreviewInfo();
         } catch (_) {}
     }
@@ -471,8 +493,7 @@
         try {
             const data = await (await fetch('/api/dashboard-stats')).json();
             document.getElementById('statPending').textContent = data.totalPending;
-            document.getElementById('statSent').textContent    = data.totalSent;
-            document.getElementById('statInvalid').textContent = data.totalInvalid || 0;
+            document.getElementById('statSent').textContent    = (data.totalSent || 0) + (data.totalInvalid || 0);
             document.getElementById('statFailed').textContent  = data.totalFailed;
 
             if (data.lastCycle) {
@@ -480,7 +501,8 @@
                 const status    = data.lastCycle.status;
                 const processed = (data.totalSent || 0) + (data.totalInvalid || 0) + (data.totalFailed || 0);
                 const total     = data.lastCycle.total_messages;
-                document.getElementById('statStatus').textContent = status.toUpperCase();
+                const statusLabel = { em_andamento: 'Disparando', concluido: 'Concluído', interrompido: 'Pausado' };
+                document.getElementById('statStatus').textContent = statusLabel[status] || status;
                 document.getElementById('cycleProgress').style.display = 'block';
                 document.getElementById('progressText').textContent    = `Progresso: ${processed}/${total}`;
                 document.getElementById('progressBar').style.width     = total > 0 ? `${(processed / total) * 100}%` : '0%';
@@ -498,6 +520,12 @@
             }
             updatePreviewInfo();
         } catch (_) {}
+    }
+
+    async function clearDashboard() {
+        if (!confirm('Limpar o dashboard vai encerrar qualquer campanha ativa e zerar os contadores. Confirmar?')) return;
+        await fetch('/api/clear-dashboard', { method: 'POST' }).catch(() => {});
+        await updateDashboard();
     }
 
     // ── Modal Interrompido ────────────────────────────────────────────────────
@@ -528,18 +556,25 @@
         const selectedZaps = Array.from(document.querySelectorAll('.zap-cb:checked')).map(cb => cb.value);
         if (!selectedZaps.length) return alert('⚠️ Selecione pelo menos 1 Zap.');
 
+        const offlineSelected = selectedZaps.filter(id => !zapStatusMap[id]);
+        if (offlineSelected.length > 0) {
+            const msg = `⚠️ ${offlineSelected.length} zap(s) selecionado(s) estão offline:\n${offlineSelected.join(', ')}\n\nEles serão removidos do disparo automaticamente pelo preflight. Continuar?`;
+            if (!confirm(msg)) return;
+        }
+
         const pending     = parseInt(document.getElementById('statPending').textContent) || 0;
         if (!pending) return alert('⚠️ Fila vazia. Processe uma lista primeiro.');
 
-        const level      = parseInt(document.getElementById('dispatchLevel').value);
-        const wLevel     = parseInt(document.getElementById('warmupLevel').value);
-        const cfg        = DISPATCH_LEVELS_CFG[level];
-        const startStr   = document.getElementById('startDatetime').value;
-        const endStr     = document.getElementById('endDatetime').value;
+        const wLevel   = parseInt(document.getElementById('warmupLevel').value);
+        const startStr = document.getElementById('startDatetime').value;
+        const endStr   = document.getElementById('endDatetime').value;
 
         const totalHours = endStr ? calcAvailableHours(endStr, startStr) : '—';
         const msgsPerZap = Math.ceil(pending / selectedZaps.length);
-        const blockMin   = Math.round((parseHHMM(WINDOW_END) - parseHHMM(WINDOW_START)) / 3);
+        const totalMin   = typeof totalHours === 'number' ? totalHours * 60 : 0;
+        const cycleMin   = SLOT_MIN * 3 + TRANSITION_MIN * 2;
+        const slotsTotal = totalMin > 0 ? Math.max(1, Math.floor(totalMin / cycleMin)) * 3 : '?';
+        const msgsSlot   = typeof slotsTotal === 'number' ? Math.ceil(pending / slotsTotal) : '?';
 
         const groupCounts = { A: 0, B: 0, C: 0 };
         selectedZaps.forEach(id => {
@@ -560,14 +595,13 @@
             <tr><td>Zaps selecionados</td><td>${selectedZaps.length} (${groupStr})</td></tr>
             <tr><td>Contatos na fila</td><td>${pending}</td></tr>
             <tr><td>Msgs por zap</td><td>~${msgsPerZap}</td></tr>
+            <tr><td>Msgs por slot (18 min)</td><td>~${msgsSlot}</td></tr>
             ${isTest ? '' : `<tr><td>Janela diária (fixa)</td><td>${WINDOW_START} – ${WINDOW_END}</td></tr>`}
-            <tr><td>Bloco por grupo (A/B/C)</td><td>~${blockMin} min</td></tr>
+            <tr><td>Slot por grupo</td><td>${SLOT_MIN} min · Rotação A→B→C</td></tr>
             <tr><td>Horas disponíveis</td><td>${totalHours}h</td></tr>
             <tr><td>Início da campanha</td><td>${startFormatted}</td></tr>
             <tr><td>Fim da campanha</td><td>${endFormatted}</td></tr>
-            <tr><td>Nível de disparo</td><td>Nível ${level} — ${cfg.batchPerZap} msgs/zap/onda</td></tr>
             <tr><td>Nível de aquecimento</td><td>Nível ${wLevel}</td></tr>
-            <tr><td>Rotação de IP</td><td>Entre cada bloco A→B→C (escalonada)</td></tr>
         `;
 
         const titleEl   = document.getElementById('modalPreviewTitle');
@@ -588,8 +622,7 @@
         fd.append('mediaMode',     document.getElementById('mediaMode').value);
         fd.append('startDatetime', startStr);
         fd.append('endDatetime',   endStr);
-        fd.append('dispatchLevel', level);
-        fd.append('warmupLevel',   wLevel);
+        fd.append('warmupLevel', wLevel);
         if (isTest) fd.append('testMode', 'true');
         const media = document.getElementById('mediaFile').files[0];
         if (media) fd.append('mediaFile', media);
@@ -621,7 +654,7 @@
                 const i      = data.info;
                 const prefix = isTest ? '🧪 Teste iniciado!' : '✅ ' + data.message;
                 const janela = isTest ? 'Sem trava de horário' : i.janela;
-                alert(`${prefix}\n${i.totalContatos} contatos · ${i.zapsSelecionados} zaps · Nível ${i.dispatchLevel}\nJanela: ${janela} · Início: ${i.inicio} · Fim: ${i.fim}`);
+                alert(`${prefix}\n${i.totalContatos} contatos · ${i.zapsSelecionados} zaps · Aquec. nível ${i.warmupLevel}\nJanela: ${janela} · Início: ${i.inicio} · Fim: ${i.fim}`);
             }
         } catch (_) {
             alert('Erro ao conectar com o servidor.');

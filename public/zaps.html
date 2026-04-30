@@ -51,6 +51,33 @@
     </style>
 </head>
 <body>
+    <!-- Modal Pairing Code -->
+    <div class="qr-modal" id="pairingModal">
+        <div class="qr-box">
+            <h2 id="pairingTitle">🔢 Conectar por Código</h2>
+            <div id="pairingContent">
+                <p style="margin-bottom:12px;color:#555;font-size:14px;">
+                    Digite o número do chip (com DDI):
+                </p>
+                <input id="pairingPhone" type="tel" placeholder="5511999999999"
+                    style="width:100%;padding:10px;font-size:16px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;margin-bottom:12px;">
+                <button class="btn" id="btnGetCode" onclick="requestPairingCode()" style="width:100%;">
+                    Gerar Código
+                </button>
+                <div id="pairingCodeDisplay" style="display:none;margin-top:16px;text-align:center;">
+                    <p style="color:#555;font-size:13px;margin-bottom:6px;">
+                        No emulador: WhatsApp → Dispositivos Conectados → Conectar com número de telefone
+                    </p>
+                    <div id="pairingCodeValue"
+                        style="font-size:36px;font-weight:bold;letter-spacing:6px;color:#075e54;padding:12px;background:#f0fff5;border-radius:8px;">
+                    </div>
+                    <p style="color:#999;font-size:12px;margin-top:8px;">O código expira em ~60 segundos</p>
+                </div>
+            </div>
+            <button class="btn btn-danger" onclick="closePairingModal()" style="margin-top:14px;">✖ Fechar</button>
+        </div>
+    </div>
+
     <!-- Modal QR Code -->
     <div class="qr-modal" id="qrModal">
         <div class="qr-box">
@@ -191,6 +218,9 @@
                             onclick="connectZap('${zap.accountId}', '${zap.state}', ${zap.hasInstance})">
                             ${connectLabel}
                         </button>
+                        <button class="btn btn-secondary" ${connectDisabled}
+                            onclick="connectPairing('${zap.accountId}')"
+                            title="Conectar sem câmera via código de 8 dígitos">🔢</button>
                         <button class="btn btn-danger" onclick="deleteZap('${zap.accountId}')"
                             title="Apagar sessão/cache" ${!zap.hasInstance ? 'disabled' : ''}>🗑️</button>
                     </div>`;
@@ -228,6 +258,62 @@
         }
 
         // ── Deletar Zap ───────────────────────────────────────
+        // ── Pairing Code ──────────────────────────────────────
+        let _pairingAccount = null;
+
+        function connectPairing(accountId) {
+            _pairingAccount = accountId;
+            document.getElementById('pairingTitle').textContent = `🔢 ${accountId} — Conectar por Código`;
+            document.getElementById('pairingPhone').value = '';
+            document.getElementById('pairingCodeDisplay').style.display = 'none';
+            document.getElementById('btnGetCode').disabled = false;
+            document.getElementById('btnGetCode').textContent = 'Gerar Código';
+            document.getElementById('pairingModal').classList.add('active');
+            setTimeout(() => document.getElementById('pairingPhone').focus(), 100);
+        }
+
+        function closePairingModal() {
+            _pairingAccount = null;
+            document.getElementById('pairingModal').classList.remove('active');
+        }
+
+        async function requestPairingCode() {
+            const phone = document.getElementById('pairingPhone').value.replace(/\D/g, '');
+            if (phone.length < 10) return alert('Digite o número completo com DDI (ex: 5511999999999).');
+
+            const btn = document.getElementById('btnGetCode');
+            btn.disabled    = true;
+            btn.textContent = '⏳ Aguardando...';
+
+            try {
+                const res  = await fetch(`/api/whatsapp/pairing-code/${_pairingAccount}`, {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ phoneNumber: phone }),
+                });
+                const data = await res.json();
+
+                if (data.error) {
+                    alert(`Erro: ${data.error}`);
+                    btn.disabled    = false;
+                    btn.textContent = 'Gerar Código';
+                    return;
+                }
+
+                document.getElementById('pairingCodeValue').textContent = data.code;
+                document.getElementById('pairingCodeDisplay').style.display = 'block';
+                btn.textContent = '🔄 Novo Código';
+                btn.disabled    = false;
+
+                // Atualiza status após 30s (tempo de parear)
+                setTimeout(refreshStatus, 30_000);
+            } catch (err) {
+                alert('Erro de comunicação com o servidor.');
+                btn.disabled    = false;
+                btn.textContent = 'Gerar Código';
+            }
+        }
+
         async function deleteZap(accountId) {
             if (!confirm(`⚠️ Isso vai desconectar e apagar a sessão de ${accountId}.\n\nEle precisará escanear o QR Code novamente.\n\nConfirmar?`)) return;
             try {
