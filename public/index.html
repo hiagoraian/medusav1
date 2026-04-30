@@ -525,6 +525,13 @@
     async function clearDashboard() {
         if (!confirm('Limpar o dashboard vai encerrar qualquer campanha ativa e zerar os contadores. Confirmar?')) return;
         await fetch('/api/clear-dashboard', { method: 'POST' }).catch(() => {});
+        document.getElementById('statPending').textContent      = '0';
+        document.getElementById('statSent').textContent         = '0';
+        document.getElementById('statFailed').textContent       = '0';
+        document.getElementById('statStatus').textContent       = 'Pronto';
+        document.getElementById('cycleProgress').style.display  = 'none';
+        document.getElementById('progressBar').style.width      = '0%';
+        document.getElementById('progressText').textContent     = 'Progresso: 0/0';
         await updateDashboard();
     }
 
