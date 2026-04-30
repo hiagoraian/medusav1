@@ -137,18 +137,9 @@ export const resetCampaign = async (cycleId) => {
 };
 
 export const clearDashboardData = async () => {
-    const { rows } = await query(
-        `SELECT id FROM dispatch_cycles ORDER BY id DESC LIMIT 1`
-    );
-    if (rows[0]) {
-        const cycleId = rows[0].id;
-        await query(`DELETE FROM messages_queue WHERE cycle_id = $1`, [cycleId]);
-        await query(
-            `UPDATE dispatch_cycles SET status = 'cancelado', end_time = NOW() WHERE id = $1`,
-            [cycleId]
-        );
-    }
-    await query(`DELETE FROM messages_queue WHERE status = 'pendente'`);
+    // Cancela TODOS os ciclos ativos/antigos, não apenas o último
+    await query(`UPDATE dispatch_cycles SET status = 'cancelado', end_time = NOW() WHERE status != 'cancelado'`);
+    await query(`DELETE FROM messages_queue`);
 };
 
 export default {
