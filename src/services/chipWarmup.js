@@ -8,17 +8,37 @@ import { rotateMobileIPsStaggered, getActiveZteIds } from './networkController.j
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-const WARMUP_TEXT_PATH = path.resolve(__dirname, '../../textAquecimento.txt');
+const WARMUP_TEXT_PATH  = path.resolve(__dirname, '../../textAquecimento.txt');
+const WARMUP_MEDIA_DIR  = path.resolve(__dirname, '../../warmup_media');
+const MEDIA_HOST        = process.env.MEDIA_HOST || 'http://host.docker.internal:3000';
 
-// Níveis 1–4: ping-pong, texto apenas
+// ── Configuração de níveis ────────────────────────────────────────────────────
+// maxImages / maxAudios = limite por zap por dia (reset à meia-noite)
 const LEVEL_CONFIG = {
-    1: { minDelayS: 120, maxDelayS: 180 },
-    2: { minDelayS:  60, maxDelayS:  90 },
-    3: { minDelayS:  30, maxDelayS:  60 },
-    4: { minDelayS:  15, maxDelayS:  30 },
+    1: { minDelayS: 120, maxDelayS: 180, maxImages: 0, maxAudios: 0 },
+    2: { minDelayS:  60, maxDelayS:  90, maxImages: 0, maxAudios: 0 },
+    3: { minDelayS:  60, maxDelayS:  90, maxImages: 2, maxAudios: 0 },
+    4: { minDelayS:  60, maxDelayS:  90, maxImages: 2, maxAudios: 4 },
 };
 
-// Estado do aquecimento manual
+// ── Contadores de mídia por zap (reset diário) ───────────────────────────────
+const _mediaCounts = new Map(); // accountId → { images: 0, audios: 0 }
+let   _mediaDate   = '';        // 'YYYY-MM-DD' da última inicialização
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const resetMediaCountsIfNewDay = (accounts) => {
+    const today = todayStr();
+    if (_mediaDate !== today) {
+        _mediaDate = today;
+        accounts.forEach(id => _mediaCounts.set(id, { images: 0, audios: 0 }));
+        console.log(`📅 [AQUECIMENTO] Contadores de mídia reiniciados para ${today}`);
+    }
+};
+
+const getMediaCount = (id) => _mediaCounts.get(id) || { images: 0, audios: 0 };
+
+// ── Estado do aquecimento manual ─────────────────────────────────────────────
 let _manualRunning = false;
 let _warmupState   = { running: false, level: 0, zapCount: 0, rotateMins: 0, startedAt: null };
 
@@ -52,6 +72,61 @@ const loadTexts = () => {
 
 const pickRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
+// ── Arquivos de mídia ─────────────────────────────────────────────────────────
+const loadMediaFiles = (subfolder) => {
+    const dir = path.join(WARMUP_MEDIA_DIR, subfolder);
+    try {
+        if (!fs.existsSync(dir)) return [];
+        return fs.readdirSync(dir).filter(f => !f.startsWith('.') && f !== '.gitkeep');
+    } catch (_) { return []; }
+};
+
+// ── Envio (texto / imagem / áudio conforme nível e cotas) ────────────────────
+const sendWarmupMessage = async (fromId, toNumber, level) => {
+    const cfg    = LEVEL_CONFIG[level] || LEVEL_CONFIG[2];
+    const counts = getMediaCount(fromId);
+
+    // Tenta áudio (nível 4)
+    if (cfg.maxAudios > 0 && counts.audios < cfg.maxAudios && Math.random() < 0.25) {
+        const files = loadMediaFiles('audios');
+        if (files.length > 0) {
+            const file = pickRandom(files);
+            try {
+                const base64 = fs.readFileSync(path.join(WARMUP_MEDIA_DIR, 'audios', file)).toString('base64');
+                await evolution.sendAudio(fromId, toNumber, base64);
+                counts.audios++;
+                _mediaCounts.set(fromId, counts);
+                console.log(`🎵 [AQUECIMENTO] ${fromId} → áudio (${counts.audios}/${cfg.maxAudios})`);
+                return;
+            } catch (_) {}
+        }
+    }
+
+    // Tenta imagem (nível 3 e 4)
+    if (cfg.maxImages > 0 && counts.images < cfg.maxImages && Math.random() < 0.30) {
+        const files = loadMediaFiles('imagens');
+        if (files.length > 0) {
+            const file = pickRandom(files);
+            const url  = `${MEDIA_HOST}/warmup_media/imagens/${encodeURIComponent(file)}`;
+            try {
+                await evolution.sendMedia(fromId, toNumber, url, 'image', '');
+                counts.images++;
+                _mediaCounts.set(fromId, counts);
+                console.log(`🖼️ [AQUECIMENTO] ${fromId} → imagem (${counts.images}/${cfg.maxImages})`);
+                return;
+            } catch (_) {}
+        }
+    }
+
+    // Fallback: texto
+    const text = processSpintax(pickRandom(loadTexts()));
+    try {
+        await evolution.sendText(fromId, toNumber, text);
+    } catch (err) {
+        console.warn(`⚠️ [AQUECIMENTO] Falha ${fromId}→${toNumber}: ${err.message}`);
+    }
+};
+
 // ── Número do dono da instância ───────────────────────────────────────────────
 const _ownerCache = new Map();
 
@@ -68,7 +143,6 @@ const getOwnerNumber = async (accountId) => {
     } catch (_) { return null; }
 };
 
-// Limpa o cache quando zaps reconectam (evita número desatualizado)
 export const clearOwnerCache = () => _ownerCache.clear();
 
 // ── Conectividade ─────────────────────────────────────────────────────────────
@@ -85,35 +159,22 @@ const filterReady = async (accounts) => {
     }).map(c => c.id);
 };
 
-// ── Envio ─────────────────────────────────────────────────────────────────────
-const sendWarmupText = async (fromId, toNumber) => {
-    const text = processSpintax(pickRandom(loadTexts()));
-    try {
-        await evolution.sendText(fromId, toNumber, text);
-    } catch (err) {
-        console.warn(`⚠️ [AQUECIMENTO] Falha ${fromId}→${toNumber}: ${err.message}`);
-    }
-};
-
 // ── Ping-pong entre um par ────────────────────────────────────────────────────
-// Uma rodada: A→B, espera, B→A, espera
 const pingPong = async (zapA, zapB, numA, numB, level, shouldContinue) => {
     const cfg = LEVEL_CONFIG[level] || LEVEL_CONFIG[2];
 
     if (!shouldContinue()) return;
     console.log(`🏓 [AQUECIMENTO] ${zapA} → ${zapB}`);
-    await sendWarmupText(zapA, numB);
+    await sendWarmupMessage(zapA, numB, level);
     await humanDelay(cfg.minDelayS, cfg.maxDelayS);
 
     if (!shouldContinue()) return;
     console.log(`🏓 [AQUECIMENTO] ${zapB} → ${zapA}`);
-    await sendWarmupText(zapB, numA);
+    await sendWarmupMessage(zapB, numA, level);
     await humanDelay(cfg.minDelayS, cfg.maxDelayS);
 };
 
-// ── Montagem de pares (rotação a cada rodada) ─────────────────────────────────
-// Algoritmo round-robin de torneio: fixa o primeiro, rotaciona os demais.
-// Com N zaps gera floor(N/2) pares por rodada, cobrindo todos ao longo das rodadas.
+// ── Montagem de pares (round-robin de torneio) ────────────────────────────────
 export const buildPairs = (zaps, round = 0) => {
     if (zaps.length < 2) return [];
     const n    = zaps.length;
@@ -125,7 +186,7 @@ export const buildPairs = (zaps, round = 0) => {
     return pairs;
 };
 
-// ── Carrega números de um conjunto de zaps ───────────────────────────────────
+// ── Carrega números de um conjunto de zaps ────────────────────────────────────
 const loadNumbers = async (accounts) => {
     const numbers = {};
     for (const id of accounts) {
@@ -144,6 +205,8 @@ export const runWarmupFor = async (activeAccounts, level = 2, durationSeconds = 
     const cfg     = LEVEL_CONFIG[level] || LEVEL_CONFIG[2];
     const endTime = Date.now() + durationSeconds * 1000;
     const shouldContinue = () => Date.now() < endTime;
+
+    resetMediaCountsIfNewDay(activeAccounts);
 
     let ready = await filterReady(activeAccounts);
     if (ready.length < 2) {
@@ -203,6 +266,8 @@ export const startWarmup = async (accountsList, level = 2, rotateMins = 0) => {
     _manualRunning = true;
     _warmupState   = { running: true, level, zapCount: withNum.length, rotateMins, startedAt: Date.now() };
 
+    resetMediaCountsIfNewDay(withNum);
+
     const shouldContinue   = () => _manualRunning;
     const rotateIntervalMs = rotateMins > 0 ? rotateMins * 60_000 : 0;
     let   nextRotateAt     = rotateIntervalMs > 0 ? Date.now() + rotateIntervalMs : Infinity;
@@ -216,6 +281,7 @@ export const startWarmup = async (accountsList, level = 2, rotateMins = 0) => {
             await rotateMobileIPsStaggered(getActiveZteIds());
             nextRotateAt = Date.now() + rotateIntervalMs;
             active = await filterReady(accountsList);
+            resetMediaCountsIfNewDay(active);
         }
 
         const alive = (await filterReady(active)).filter(id => numbers[id]);
@@ -253,8 +319,7 @@ const isWithinWindow = (windowStart, windowEnd) => {
 };
 
 const msUntilWindowOpen = (windowStart) => {
-    const now    = new Date();
-    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const now = new Date();
     const [sh, sm] = windowStart.split(':').map(Number);
     const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), sh, sm, 0);
     if (target <= now) target.setDate(target.getDate() + 1);
@@ -275,7 +340,7 @@ export const startScheduledWarmup = async (
     startDatetime,         // ISO string ou null = imediato
     endDatetime,           // ISO string — prazo final absoluto
     windowStart = '08:00',
-    windowEnd   = '19:00',
+    windowEnd   = '19:45',
 ) => {
     if (_manualRunning) {
         console.warn('⚠️ [AQUECIMENTO] Já está rodando. Ignorando.');
@@ -312,7 +377,6 @@ export const startScheduledWarmup = async (
             const waitMs  = msUntilWindowOpen(windowStart);
             const waitMin = Math.ceil(waitMs / 60_000);
             console.log(`⏰ [AQUECIMENTO] Fora da janela ${windowStart}–${windowEnd}. Retomando em ${waitMin} min.`);
-            // Espera em fatias de 5 min para poder ser interrompido
             const sleepUntil = Date.now() + waitMs;
             while (_manualRunning && Date.now() < sleepUntil) {
                 await new Promise(r => setTimeout(r, Math.min(300_000, sleepUntil - Date.now())));
@@ -320,12 +384,11 @@ export const startScheduledWarmup = async (
             continue;
         }
 
-        // Dentro da janela — calcula quanto tempo resta (janela ou prazo final)
+        // Dentro da janela — calcula quanto tempo resta
         const windowCloseMs = endOfWindowToday(windowEnd).getTime();
         const durationMs    = Math.min(windowCloseMs, endMs) - Date.now();
 
         if (durationMs < 60_000) {
-            // Menos de 1 min restante na janela — espera a janela fechar
             await new Promise(r => setTimeout(r, durationMs + 5_000));
             continue;
         }
