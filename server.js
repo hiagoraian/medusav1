@@ -15,7 +15,6 @@ import { runCampaignLoop, requestStop }            from './src/services/orchestr
 import { startWarmup, stopWarmup, startScheduledWarmup, isWarmupRunning, getWarmupState } from './src/services/chipWarmup.js';
 import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount } from './src/services/networkController.js';
 import { generateCampaignReport }                  from './src/services/reportGenerator.js';
-import { handleWebhookEvent, getNotificationConfig, saveNotificationConfig } from './src/services/notificationForwarder.js';
 import { notifyAck }                              from './src/services/ackWaiter.js';
 import * as evolution                              from './src/evolution/client.js';
 
@@ -195,8 +194,6 @@ app.post('/webhook/evolution', (req, res) => {
         }
     }
 
-    // Notificações desativadas temporariamente
-    // handleWebhookEvent(event).catch(err => console.warn('⚠️ [WEBHOOK]', err.message));
 });
 
 app.delete('/api/whatsapp/:accountId', async (req, res) => {
@@ -477,29 +474,6 @@ app.post('/api/warmup-chips/scheduled', async (req, res) => {
 
         res.json({ message: `🔥 Aquecimento agendado — janela ${windowStart}–${windowEnd} — até ${new Date(endDatetime).toLocaleString('pt-BR')}` });
         startScheduledWarmup(accounts, parseInt(level), startDatetime || null, endDatetime, windowStart, windowEnd);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// ── Notificações — grupo de respostas ────────────────────────────────────────
-
-app.get('/api/notification-group', (req, res) => {
-    res.json(getNotificationConfig());
-});
-
-app.post('/api/notification-group', (req, res) => {
-    const { groupJid, groupName } = req.body;
-    if (!groupJid) return res.status(400).json({ error: 'groupJid obrigatório.' });
-    saveNotificationConfig({ groupJid, groupName: groupName || groupJid });
-    console.log(`🔔 [NOTIF] Grupo configurado: ${groupName || groupJid} (${groupJid})`);
-    res.json({ message: '✅ Grupo de notificação salvo!' });
-});
-
-app.get('/api/groups/:accountId', async (req, res) => {
-    try {
-        const groups = await evolution.fetchGroups(req.params.accountId);
-        res.json(groups);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

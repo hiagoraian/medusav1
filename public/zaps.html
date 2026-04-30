@@ -37,7 +37,6 @@
         .group-item:hover { border-color: #25D366; background: #f0fff5; }
         .group-item input[type=radio] { flex-shrink: 0; }
         .group-item.selected { border-color: #25D366; background: #dcf8c6; }
-        .notif-badge { display: inline-block; background: #dcf8c6; border: 1px solid #25D366; border-radius: 6px; padding: 8px 14px; font-size: 13px; color: #075e54; font-weight: bold; }
 
         /* Modal QR Code */
         .qr-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
@@ -66,7 +65,7 @@
     </div>
 
     <div class="container">
-        <h1>🔌 Gestão de Zaps (1-24)</h1>
+        <h1>🔌 Gestão de Zaps</h1>
 
         <div class="nav">
             <a href="index.html">← Painel</a>
@@ -97,34 +96,6 @@
             <div id="maintenanceResult" class="info-box" style="display: none; margin-top: 15px;"></div>
         </div>
 
-        <!-- Grupo de Notificação de Respostas -->
-        <div class="section">
-            <h2>🔔 Grupo de Notificação de Respostas</h2>
-            <p style="font-size:14px;color:#555;margin:0 0 12px;">
-                Configure um grupo do WhatsApp para receber notificações quando alguém
-                <b>visualizar</b>, <b>reagir</b> ou <b>responder</b> uma mensagem disparada.
-            </p>
-
-            <div id="notifCurrentGroup" style="margin-bottom:14px;"></div>
-
-            <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
-                <div style="flex:1;min-width:160px;">
-                    <label style="font-size:13px;font-weight:bold;display:block;margin-bottom:5px;">Zap para listar grupos:</label>
-                    <select id="notifZapSelect" style="width:100%;padding:9px;border:1px solid #ccc;border-radius:5px;font-size:13px;">
-                        <option value="">— Escolha um zap conectado —</option>
-                    </select>
-                </div>
-                <button class="btn btn-secondary" style="width:auto;padding:10px 18px;" onclick="fetchGroups()">🔍 Buscar Grupos</button>
-            </div>
-
-            <div id="groupsList" style="margin-top:14px;"></div>
-
-            <div style="margin-top:12px;display:none;" id="notifSaveBar">
-                <button class="btn" style="width:auto;padding:10px 24px;" onclick="saveNotifGroup()">💾 Salvar Grupo Selecionado</button>
-            </div>
-
-            <div id="notifResult" class="info-box" style="display:none;margin-top:12px;"></div>
-        </div>
     </div>
 
     <script>
@@ -182,9 +153,7 @@
             try {
                 const res    = await fetch('/api/zaps-status');
                 const data   = await res.json();
-                const online = new Set(data.filter(z => z.state === 'open').map(z => z.accountId));
                 renderZapCards(data);
-                populateNotifZapSelect(data);
             } catch (err) {
                 console.error('Erro ao atualizar status:', err);
             }
@@ -291,6 +260,7 @@
             }
 
             if (allAccounts.length === 0) {
+                bar.style.display = 'block';
                 label.textContent = '⚠️ Nenhum zap com sessão salva para reconectar.';
                 btn.disabled  = false;
                 btn.innerHTML = '⚡ Reconectar Todos';
@@ -367,98 +337,7 @@
             }
         }
 
-        // ── Grupo de Notificação ──────────────────────────────
-        let _selectedGroupJid  = null;
-        let _selectedGroupName = null;
-
-        async function loadNotifConfig() {
-            try {
-                const res  = await fetch('/api/notification-group');
-                const data = await res.json();
-                const box  = document.getElementById('notifCurrentGroup');
-                if (data.groupJid) {
-                    box.innerHTML = `<span class="notif-badge">✅ Grupo atual: <b>${data.groupName || data.groupJid}</b></span>`;
-                } else {
-                    box.innerHTML = `<span style="color:#999;font-size:13px;">Nenhum grupo configurado ainda.</span>`;
-                }
-            } catch (_) {}
-        }
-
-        async function fetchGroups() {
-            const zapId = document.getElementById('notifZapSelect').value;
-            if (!zapId) return alert('Selecione um zap conectado primeiro.');
-
-            const btn = document.querySelector('button[onclick="fetchGroups()"]');
-            btn.disabled = true; btn.textContent = '⏳ Buscando...';
-
-            try {
-                const res    = await fetch(`/api/groups/${zapId}`);
-                const groups = await res.json();
-                const list   = document.getElementById('groupsList');
-
-                if (!groups.length) {
-                    list.innerHTML = '<p style="color:#999;font-size:13px;">Nenhum grupo encontrado. Verifique se o zap está conectado e participa de algum grupo.</p>';
-                    return;
-                }
-
-                list.innerHTML = groups.map(g => `
-                    <div class="group-item" onclick="selectGroup('${g.id}', '${(g.subject||g.name||g.id).replace(/'/g,"\\'")}', this)">
-                        <input type="radio" name="notifGroup" value="${g.id}">
-                        <div>
-                            <div style="font-weight:bold;">${g.subject || g.name || g.id}</div>
-                            <div style="font-size:11px;color:#999;">${g.id}</div>
-                        </div>
-                    </div>`).join('');
-
-                document.getElementById('notifSaveBar').style.display = 'block';
-            } catch (err) {
-                alert('Erro ao buscar grupos: ' + err.message);
-            } finally {
-                btn.disabled = false; btn.textContent = '🔍 Buscar Grupos';
-            }
-        }
-
-        function selectGroup(jid, name, el) {
-            _selectedGroupJid  = jid;
-            _selectedGroupName = name;
-            document.querySelectorAll('.group-item').forEach(e => e.classList.remove('selected'));
-            el.classList.add('selected');
-            el.querySelector('input[type=radio]').checked = true;
-        }
-
-        async function saveNotifGroup() {
-            if (!_selectedGroupJid) return alert('Selecione um grupo primeiro.');
-            try {
-                const res  = await fetch('/api/notification-group', {
-                    method:  'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body:    JSON.stringify({ groupJid: _selectedGroupJid, groupName: _selectedGroupName }),
-                });
-                const data = await res.json();
-                const box  = document.getElementById('notifResult');
-                box.style.display     = 'block';
-                box.style.borderColor = data.error ? '#d32f2f' : '#25D366';
-                box.textContent       = data.message || data.error;
-                if (!data.error) loadNotifConfig();
-            } catch (_) { alert('Erro ao salvar.'); }
-        }
-
-        // Popula o select de zaps conectados para busca de grupos
-        function populateNotifZapSelect(zapData) {
-            const sel = document.getElementById('notifZapSelect');
-            const prev = sel.value;
-            sel.innerHTML = '<option value="">— Escolha um zap conectado —</option>';
-            zapData.filter(z => z.state === 'open').forEach(z => {
-                const opt = document.createElement('option');
-                opt.value       = z.accountId;
-                opt.textContent = z.accountId;
-                if (z.accountId === prev) opt.selected = true;
-                sel.appendChild(opt);
-            });
-        }
-
         // ── Init ──────────────────────────────────────────────
-        loadNotifConfig();
         refreshStatus();
         setInterval(refreshStatus, 10000);
     </script>
