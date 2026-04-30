@@ -146,8 +146,8 @@ app.post('/api/whatsapp/start', async (req, res) => {
         try {
             await evolution.createInstance(accountId, proxyConfig);
         } catch (createErr) {
-            // 400 = instância já existe na Evolution API — ignora e segue para pegar QR
             if (createErr.response?.status !== 400) throw createErr;
+            // 400 = já existe — continua
         }
 
         evolution.setWebhook(accountId, `${WEBHOOK_BASE}/webhook/evolution`)
@@ -158,7 +158,18 @@ app.post('/api/whatsapp/start', async (req, res) => {
             return res.json({ connected: true, message: `${accountId} já está conectado.` });
         }
 
-        const qrcode = await evolution.getQRCode(accountId);
+        let qrcode = await evolution.getQRCode(accountId);
+
+        // Instância pode estar em modo pairing code (qrcode=false) — sem QR disponível.
+        // Recria com qrcode=true para gerar o QR corretamente.
+        if (!qrcode) {
+            try { await evolution.deleteInstance(accountId); } catch (_) {}
+            await new Promise(r => setTimeout(r, 2000));
+            await evolution.createInstance(accountId, proxyConfig, true);
+            await new Promise(r => setTimeout(r, 3000));
+            qrcode = await evolution.getQRCode(accountId);
+        }
+
         res.json({ connected: false, qrcode });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -187,8 +198,13 @@ app.post('/api/whatsapp/pairing-code/:accountId', async (req, res) => {
         try { await evolution.deleteInstance(accountId); } catch (_) {}
         await new Promise(r => setTimeout(r, 2000));
         await evolution.createInstance(accountId, null, false, phoneNumber);
-        await new Promise(r => setTimeout(r, 5000));
-        const code = await evolution.getPairingCode(accountId);
+
+        // Tenta até 4x com 4s de intervalo (até ~16s) — a Evolution API pode demorar
+        let code = null;
+        for (let i = 0; i < 4 && !code; i++) {
+            await new Promise(r => setTimeout(r, 4000));
+            code = await evolution.getPairingCode(accountId);
+        }
         if (!code) return res.status(500).json({ error: 'Evolution API não retornou o código. Tente novamente.' });
         res.json({ code });
     } catch (err) {

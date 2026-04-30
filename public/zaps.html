@@ -283,7 +283,7 @@
 
             const btn = document.getElementById('btnGetCode');
             btn.disabled    = true;
-            btn.textContent = '⏳ Aguardando (~3s)...';
+            btn.textContent = '⏳ Aguardando (até 20s)...';
 
             try {
                 const res  = await fetch(`/api/whatsapp/pairing-code/${_pairingAccount}`, {
