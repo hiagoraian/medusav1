@@ -1,15 +1,20 @@
 // Registro de mensagens aguardando confirmação do servidor WA (SERVER_ACK).
 // O webhook de messages.update chama notifyAck() quando a confirmação chega.
-// preflightCheck() usa waitForAck() para verificar se o zap realmente envia.
 
-const waiters = new Map(); // keyId → resolve(true/false)
+const waiters  = new Map(); // keyId → resolve fn
+const preAcked = new Map(); // ACKs que chegaram antes do waitForAck ser registrado
 
 /**
  * Aguarda SERVER_ACK para um keyId específico.
- * Resolve true se o ACK chegou, false se expirou o timeout.
+ * Resolve true se ACK chegou, false se expirou o timeout.
+ * Trata a race condition onde o ACK chega antes do registro.
  */
-export const waitForAck = (keyId, timeoutMs = 8000) =>
-    new Promise((resolve) => {
+export const waitForAck = (keyId, timeoutMs = 8000) => {
+    if (preAcked.has(keyId)) {
+        preAcked.delete(keyId);
+        return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
         const timer = setTimeout(() => {
             waiters.delete(keyId);
             resolve(false);
@@ -21,13 +26,20 @@ export const waitForAck = (keyId, timeoutMs = 8000) =>
             resolve(true);
         });
     });
+};
 
 /**
  * Chamado pelo webhook handler quando messages.update chega com status >= SERVER_ACK.
  */
 export const notifyAck = (keyId) => {
     const fn = waiters.get(keyId);
-    if (fn) fn();
+    if (fn) {
+        fn();
+    } else {
+        // ACK chegou antes do waitForAck — guarda por 2 minutos
+        preAcked.set(keyId, true);
+        setTimeout(() => preAcked.delete(keyId), 120_000);
+    }
 };
 
 export default { waitForAck, notifyAck };

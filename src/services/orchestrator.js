@@ -120,8 +120,13 @@ const buildSubGroupOffsets = (accounts, staggerMs) => {
 // ── Aguarda conclusão da onda ─────────────────────────────────────────────────
 
 const waitForWaveToFinish = async (cycleId) => {
+    const deadline = Date.now() + 45 * 60_000; // máximo 45 min por onda
     while (!stopRequested) {
         if ((await countPendingInCycle(cycleId)) === 0) break;
+        if (Date.now() > deadline) {
+            console.warn(`[ORCH] waitForWaveToFinish: timeout de 45min para ciclo ${cycleId} — avançando.`);
+            break;
+        }
         await new Promise(r => setTimeout(r, 5_000));
     }
 };

@@ -3,9 +3,9 @@ const { Pool } = pg;
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL || 'postgresql://medusa:medusa@localhost:5432/medusa',
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
+    max: 25,
+    idleTimeoutMillis: 60000,
+    connectionTimeoutMillis: 8000,
 });
 
 pool.on('error', (err) => {

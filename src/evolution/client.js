@@ -35,7 +35,7 @@ export const createInstance = async (instanceName, proxyConfig = null, withQR = 
 export const getPairingCode = async (instanceName) => {
     try {
         const { data } = await api.get(`/instance/connect/${instanceName}`);
-        return data?.pairingCode || null;
+        return data?.pairingCode || data?.code || data?.instance?.pairingCode || null;
     } catch (_) {
         return null;
     }
