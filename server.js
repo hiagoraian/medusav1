@@ -198,13 +198,14 @@ app.post('/api/whatsapp/pairing-code/:accountId', async (req, res) => {
         // Apaga instância desconectada e recria com número (necessário para gerar pairing code)
         try { await evolution.deleteInstance(accountId); } catch (_) {}
         await new Promise(r => setTimeout(r, 2000));
-        await evolution.createInstance(accountId, null, false, phoneNumber);
+        await evolution.createInstance(accountId, null, true, phoneNumber);
+        await new Promise(r => setTimeout(r, 3000));
 
-        // Tenta até 4x com 4s de intervalo (até ~16s) — a Evolution API pode demorar
+        // Solicita o pairing code explicitamente via POST
         let code = null;
-        for (let i = 0; i < 4 && !code; i++) {
-            await new Promise(r => setTimeout(r, 4000));
-            code = await evolution.getPairingCode(accountId);
+        for (let i = 0; i < 3 && !code; i++) {
+            if (i > 0) await new Promise(r => setTimeout(r, 3000));
+            code = await evolution.getPairingCode(accountId, phoneNumber);
         }
         if (!code) return res.status(500).json({ error: 'Evolution API não retornou o código. Tente novamente.' });
         res.json({ code });

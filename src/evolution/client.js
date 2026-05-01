@@ -32,11 +32,18 @@ export const createInstance = async (instanceName, proxyConfig = null, withQR = 
  * @param {string} phoneNumber - número completo com DDI, ex: 5511999999999
  * @returns {string|null} código de 8 caracteres ou null em caso de erro
  */
-export const getPairingCode = async (instanceName) => {
+/**
+ * Solicita pairing code à Evolution API para o número informado.
+ * Deve ser chamado após createInstance — retorna o código de 8 dígitos.
+ */
+export const getPairingCode = async (instanceName, phoneNumber) => {
     try {
-        const { data } = await api.get(`/instance/connect/${instanceName}`);
-        return data?.pairingCode || data?.code || data?.instance?.pairingCode || null;
-    } catch (_) {
+        const number = String(phoneNumber).replace(/\D/g, '');
+        const { data } = await api.post(`/instance/pairing-code/${instanceName}`, { number });
+        console.log(`[PAIRING] ${instanceName}:`, JSON.stringify(data).slice(0, 200));
+        return data?.pairingCode || data?.code || null;
+    } catch (err) {
+        console.log(`[PAIRING] Erro ${instanceName}: ${err.response?.status} ${err.message}`);
         return null;
     }
 };
