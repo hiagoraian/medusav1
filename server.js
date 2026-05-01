@@ -18,6 +18,7 @@ import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount } 
 import { generateCampaignReport }                  from './src/services/reportGenerator.js';
 import { notifyAck }                              from './src/services/ackWaiter.js';
 import * as evolution                              from './src/evolution/client.js';
+import { callZapsAgent }                          from './src/agents/zapsAgent.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -579,6 +580,45 @@ app.post('/api/report/generate/:cycleId', async (req, res) => {
 app.get('/api/devices-status', async (req, res) => {
     try { res.json(await checkAllDevicesStatus()); }
     catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Agente IA — Zaps ─────────────────────────────────────────────────────────
+
+app.post('/api/agent/zaps', async (req, res) => {
+    const { message, history = [] } = req.body;
+    if (!message?.trim()) return res.status(400).json({ error: 'Mensagem obrigatória.' });
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY não configurada no .env' });
+
+    try {
+        // Coleta contexto real dos zaps para enriquecer a pergunta
+        const instances = await evolution.fetchInstances().catch(() => []);
+        const instanceMap = {};
+        instances.forEach(inst => {
+            const name  = inst.instanceName || inst.name;
+            const state = inst.connectionStatus || inst.instance?.state || inst.state || 'close';
+            if (name) instanceMap[name] = state;
+        });
+
+        const MAX_ZAP = 48;
+        const lines = [];
+        for (let i = 1; i <= MAX_ZAP; i++) {
+            const id = `WA-${String(i).padStart(2, '0')}`;
+            if (id in instanceMap) lines.push(`${id}: ${instanceMap[id]}`);
+        }
+
+        const online  = lines.filter(l => l.includes('open')).length;
+        const total   = lines.length;
+        const context = `[Contexto ${new Date().toLocaleString('pt-BR')}]\n`
+                      + `Zaps cadastrados: ${total} | Online: ${online} | Offline: ${total - online}\n`
+                      + lines.join('\n');
+
+        const fullMessage = `${message.trim()}\n\n${context}`;
+        const response    = await callZapsAgent(fullMessage, history);
+        res.json({ response });
+    } catch (err) {
+        console.error('[AGENT/ZAPS]', err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ── Inicialização ─────────────────────────────────────────────────────────────

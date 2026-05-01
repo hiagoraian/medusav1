@@ -6,6 +6,28 @@
     <title>Gestão de Zaps - Medusa</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030; }
+
+        /* ── Agente IA ── */
+        .agent-fab { position: fixed; bottom: 28px; right: 28px; z-index: 900; background: #075e54; color: #fff; border: none; border-radius: 50px; padding: 14px 20px; font-size: 15px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 8px; transition: 0.2s; }
+        .agent-fab:hover { background: #054c44; transform: scale(1.04); }
+        .agent-panel { position: fixed; bottom: 90px; right: 28px; width: 400px; max-height: 560px; background: #fff; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); display: none; flex-direction: column; z-index: 901; overflow: hidden; }
+        .agent-panel.open { display: flex; }
+        .agent-header { background: #075e54; color: #fff; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; }
+        .agent-header h3 { margin: 0; font-size: 15px; }
+        .agent-header span { font-size: 12px; opacity: 0.75; }
+        .agent-clear { background: none; border: 1px solid rgba(255,255,255,0.4); color: #fff; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
+        .agent-clear:hover { background: rgba(255,255,255,0.15); }
+        .agent-messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: #f0f0f0; }
+        .agent-msg { max-width: 88%; padding: 10px 13px; border-radius: 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+        .agent-msg.user { background: #dcf8c6; align-self: flex-end; border-bottom-right-radius: 3px; }
+        .agent-msg.bot  { background: #fff; align-self: flex-start; border-bottom-left-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .agent-msg.typing { color: #999; font-style: italic; }
+        .agent-input-row { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #eee; background: #fff; }
+        .agent-input { flex: 1; border: 1px solid #ddd; border-radius: 20px; padding: 9px 14px; font-size: 13px; outline: none; resize: none; max-height: 80px; font-family: inherit; }
+        .agent-input:focus { border-color: #25D366; }
+        .agent-send { background: #25D366; color: #fff; border: none; border-radius: 50%; width: 38px; height: 38px; cursor: pointer; font-size: 17px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: 0.2s; }
+        .agent-send:hover { background: #128C7E; }
+        .agent-send:disabled { background: #ccc; cursor: not-allowed; }
         .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
         h1 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 0; }
         .btn { background-color: #25D366; color: white; border: none; padding: 10px 20px; font-size: 14px; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s; }
@@ -124,6 +146,24 @@
         </div>
 
     </div>
+
+    <!-- Agente IA — Zaps -->
+    <div class="agent-panel" id="agentPanel">
+        <div class="agent-header">
+            <div>
+                <h3>🤖 Especialista em Zaps</h3>
+                <span>Cache de sessão · Diagnóstico · Conexão</span>
+            </div>
+            <button class="agent-clear" onclick="clearAgent()">Limpar</button>
+        </div>
+        <div class="agent-messages" id="agentMessages"></div>
+        <div class="agent-input-row">
+            <textarea id="agentInput" class="agent-input" rows="1"
+                placeholder="Ex: Por que meus zaps desconectam? Como manter a sessão por semanas?"></textarea>
+            <button id="agentSend" class="agent-send" onclick="sendAgentMessage()">➤</button>
+        </div>
+    </div>
+    <button class="agent-fab" onclick="toggleAgent()">🤖 Especialista Zaps</button>
 
     <script>
         let qrPollInterval = null;
@@ -426,6 +466,80 @@
         // ── Init ──────────────────────────────────────────────
         refreshStatus();
         setInterval(refreshStatus, 10000);
+
+        // ── Agente IA — Zaps ──────────────────────────────────
+        let agentHistory = [];
+        let agentOpen    = false;
+
+        function toggleAgent() {
+            agentOpen = !agentOpen;
+            document.getElementById('agentPanel').classList.toggle('open', agentOpen);
+            if (agentOpen && agentHistory.length === 0) {
+                appendAgentMsg('bot', 'Olá! Sou o especialista em gestão de Zaps. Posso diagnosticar conexões, orientar sobre cache de sessão e ajudar a manter seus zaps ativos por mais tempo.\n\nComo posso ajudar?');
+            }
+        }
+
+        function clearAgent() {
+            agentHistory = [];
+            document.getElementById('agentMessages').innerHTML = '';
+            appendAgentMsg('bot', 'Conversa reiniciada. Como posso ajudar?');
+        }
+
+        function appendAgentMsg(role, text) {
+            const div = document.createElement('div');
+            div.className = `agent-msg ${role}`;
+            div.textContent = text;
+            const msgs = document.getElementById('agentMessages');
+            msgs.appendChild(div);
+            msgs.scrollTop = msgs.scrollHeight;
+            return div;
+        }
+
+        async function sendAgentMessage() {
+            const input = document.getElementById('agentInput');
+            const text  = input.value.trim();
+            if (!text) return;
+
+            input.value   = '';
+            input.style.height = '';
+            document.getElementById('agentSend').disabled = true;
+
+            appendAgentMsg('user', text);
+            const typing = appendAgentMsg('bot typing', 'Analisando...');
+
+            try {
+                const res  = await fetch('/api/agent/zaps', {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ message: text, history: agentHistory }),
+                });
+                const data = await res.json();
+
+                typing.remove();
+
+                const reply = data.response || data.error || 'Erro ao obter resposta.';
+                appendAgentMsg('bot', reply);
+
+                agentHistory.push({ role: 'user',      content: text  });
+                agentHistory.push({ role: 'assistant',  content: reply });
+                if (agentHistory.length > 20) agentHistory = agentHistory.slice(-20);
+            } catch (_) {
+                typing.remove();
+                appendAgentMsg('bot', 'Erro de conexão com o agente.');
+            } finally {
+                document.getElementById('agentSend').disabled = false;
+                input.focus();
+            }
+        }
+
+        document.getElementById('agentInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAgentMessage(); }
+        });
+
+        document.getElementById('agentInput').addEventListener('input', function () {
+            this.style.height = '';
+            this.style.height = Math.min(this.scrollHeight, 80) + 'px';
+        });
     </script>
 </body>
 </html>
