@@ -107,7 +107,7 @@ export const sendMedia = async (instanceName, number, mediaUrl, mediatype, capti
         mimetype: MIMETYPES[mediatype] || 'application/octet-stream',
         media:    mediaUrl,
         caption:  caption || '',
-    });
+    }, { timeout: 60000 });
     return data;
 };
 
