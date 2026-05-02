@@ -4,6 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import multer from 'multer';
 import fs from 'fs';
+import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 
 import { initSchema, query }                        from './src/database/postgres.js';
@@ -18,10 +19,13 @@ import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount } 
 import { generateCampaignReport }                  from './src/services/reportGenerator.js';
 import { notifyAck }                              from './src/services/ackWaiter.js';
 import * as evolution                              from './src/evolution/client.js';
-import { callZapsAgent }                          from './src/agents/zapsAgent.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
+
+// Pairing codes recebidos via webhook QRCODE_UPDATED
+// instanceName → code string (null enquanto aguarda)
+const pairingCodeStore = new Map();
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -147,8 +151,9 @@ app.post('/api/whatsapp/start', async (req, res) => {
         try {
             await evolution.createInstance(accountId, proxyConfig);
         } catch (createErr) {
-            if (createErr.response?.status !== 400) throw createErr;
-            // 400 = já existe — continua
+            const status = createErr.response?.status;
+            if (status !== 400 && status !== 403) throw createErr;
+            // 400 = já existe | 403 = instância existe após logout — continua
         }
 
         evolution.setWebhook(accountId, `${WEBHOOK_BASE}/webhook/evolution`)
@@ -159,17 +164,10 @@ app.post('/api/whatsapp/start', async (req, res) => {
             return res.json({ connected: true, message: `${accountId} já está conectado.` });
         }
 
+        // QR pode levar alguns segundos para ser gerado pelo Baileys
         let qrcode = await evolution.getQRCode(accountId);
-
-        // Instância pode estar em modo pairing code (qrcode=false) — sem QR disponível.
-        // Recria com qrcode=true para gerar o QR corretamente.
-        if (!qrcode) {
-            try { await evolution.deleteInstance(accountId); } catch (_) {}
-            await new Promise(r => setTimeout(r, 2000));
-            await evolution.createInstance(accountId, proxyConfig, true);
-            await new Promise(r => setTimeout(r, 3000));
-            qrcode = await evolution.getQRCode(accountId);
-        }
+        if (!qrcode) await new Promise(r => setTimeout(r, 3000));
+        qrcode = qrcode || await evolution.getQRCode(accountId);
 
         res.json({ connected: false, qrcode });
     } catch (err) {
@@ -195,18 +193,29 @@ app.post('/api/whatsapp/pairing-code/:accountId', async (req, res) => {
     try {
         const state = await evolution.getConnectionState(accountId);
         if (state === 'open') return res.status(400).json({ error: 'Zap já está conectado. Desconecte antes de usar o código de pareamento.' });
-        // Apaga instância desconectada e recria com número (necessário para gerar pairing code)
+
+        // Remove instância anterior para garantir estado limpo
         try { await evolution.deleteInstance(accountId); } catch (_) {}
         await new Promise(r => setTimeout(r, 2000));
-        await evolution.createInstance(accountId, null, true, phoneNumber);
-        await new Promise(r => setTimeout(r, 3000));
 
-        // Solicita o pairing code explicitamente via POST
+        // Cria instância — qrcode=true para forçar conexão automática do socket
+        pairingCodeStore.delete(accountId);
+        await evolution.createInstance(accountId, null, true, phoneNumber, true);
+        evolution.setWebhook(accountId, `${WEBHOOK_BASE}/webhook/evolution`).catch(() => {});
+
+        // Aguarda Baileys conectar (~3s), depois tenta POST /instance/requestCode
+        // (endpoint oficial) + GET /instance/connect como fallback
+        await new Promise(r => setTimeout(r, 3_000));
+
+        const deadline = Date.now() + 25_000;
         let code = null;
-        for (let i = 0; i < 3 && !code; i++) {
-            if (i > 0) await new Promise(r => setTimeout(r, 3000));
-            code = await evolution.getPairingCode(accountId, phoneNumber);
+        while (Date.now() < deadline) {
+            code = pairingCodeStore.get(accountId) || await evolution.getPairingCode(accountId, phoneNumber);
+            if (code) { console.log(`[PAIRING] ${accountId}: código → ${code}`); break; }
+            await new Promise(r => setTimeout(r, 500));
         }
+        pairingCodeStore.delete(accountId);
+
         if (!code) return res.status(500).json({ error: 'Evolution API não retornou o código. Tente novamente.' });
         res.json({ code });
     } catch (err) {
@@ -225,6 +234,19 @@ app.post('/webhook/evolution', (req, res) => {
         return;
     }
 
+    if (event.event === 'QRCODE_UPDATED') {
+        const instanceName = event.instance || event.data?.instance;
+        const d = event.data || {};
+        console.log(`[WEBHOOK QRCODE] ${instanceName}:`, JSON.stringify(d).slice(0, 200));
+        // Pairing code chega aqui quando instância criada com qrcode=false
+        const code = d?.pairingCode || d?.qrcode?.pairingCode || d?.code || null;
+        if (code && !String(code).startsWith('2@') && String(code).length < 20) {
+            pairingCodeStore.set(instanceName, code);
+            console.log(`[PAIRING STORE] ${instanceName}: código guardado → ${code}`);
+        }
+        return;
+    }
+
     // Confirma ACKs para o preflight check (SERVER_ACK ou superior)
     if (event.event === 'messages.update' || event.event === 'MESSAGES_UPDATE') {
         const updates = Array.isArray(event.data) ? event.data : [event.data];
@@ -239,15 +261,30 @@ app.post('/webhook/evolution', (req, res) => {
 
 });
 
+app.post('/api/whatsapp/disconnect/:accountId', async (req, res) => {
+    const { accountId } = req.params;
+    if (!accountId || !/^WA-\d{2}$/.test(accountId))
+        return res.status(400).json({ error: 'ID inválido.' });
+    try {
+        await evolution.logoutInstance(accountId);
+        console.log(`🔌 [${accountId}] Desconectado (sessão mantida).`);
+        res.json({ message: `${accountId} desconectado. O cache foi mantido — reconecte via QR.` });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.delete('/api/whatsapp/:accountId', async (req, res) => {
     const { accountId } = req.params;
     if (!accountId || !/^WA-\d{2}$/.test(accountId))
         return res.status(400).json({ error: 'ID inválido.' });
 
     try {
-        try { await evolution.logoutInstance(accountId); } catch (_) {}  // ignora se já desconectado
-        await evolution.deleteInstance(accountId);
-        console.log(`🗑️ [${accountId}] Instância removida da Evolution API.`);
+        try { await evolution.logoutInstance(accountId); } catch (_) {}
+        try { await evolution.deleteInstance(accountId); } catch (_) {}
+        // Garante remoção dos arquivos de autenticação do Baileys no volume Docker
+        exec(`docker exec medusa_evolution rm -rf /evolution/instances/${accountId}`, () => {});
+        console.log(`🗑️ [${accountId}] Instância e cache Baileys removidos.`);
         res.json({ message: `${accountId} desconectado e removido com sucesso.` });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -583,44 +620,6 @@ app.get('/api/devices-status', async (req, res) => {
     catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ── Agente IA — Zaps ─────────────────────────────────────────────────────────
-
-app.post('/api/agent/zaps', async (req, res) => {
-    const { message, history = [] } = req.body;
-    if (!message?.trim()) return res.status(400).json({ error: 'Mensagem obrigatória.' });
-    if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY não configurada no .env' });
-
-    try {
-        // Coleta contexto real dos zaps para enriquecer a pergunta
-        const instances = await evolution.fetchInstances().catch(() => []);
-        const instanceMap = {};
-        instances.forEach(inst => {
-            const name  = inst.instanceName || inst.name;
-            const state = inst.connectionStatus || inst.instance?.state || inst.state || 'close';
-            if (name) instanceMap[name] = state;
-        });
-
-        const MAX_ZAP = 48;
-        const lines = [];
-        for (let i = 1; i <= MAX_ZAP; i++) {
-            const id = `WA-${String(i).padStart(2, '0')}`;
-            if (id in instanceMap) lines.push(`${id}: ${instanceMap[id]}`);
-        }
-
-        const online  = lines.filter(l => l.includes('open')).length;
-        const total   = lines.length;
-        const context = `[Contexto ${new Date().toLocaleString('pt-BR')}]\n`
-                      + `Zaps cadastrados: ${total} | Online: ${online} | Offline: ${total - online}\n`
-                      + lines.join('\n');
-
-        const fullMessage = `${message.trim()}\n\n${context}`;
-        const response    = await callZapsAgent(fullMessage, history);
-        res.json({ response });
-    } catch (err) {
-        console.error('[AGENT/ZAPS]', err.message);
-        res.status(500).json({ error: err.message });
-    }
-});
 
 // ── Inicialização ─────────────────────────────────────────────────────────────
 

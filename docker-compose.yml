@@ -1,6 +1,6 @@
 services:
   evolution:
-    image: atendai/evolution-api:latest
+    image: atendai/evolution-api:v2.2.3
     container_name: medusa_evolution
     ports:
       - "8081:8080"

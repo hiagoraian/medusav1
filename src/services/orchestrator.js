@@ -231,7 +231,7 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
 
             // Calcula dinamicamente quantas msgs por zap neste slot
             const totalPending  = await countPending();
-            const timeLeftMs    = Math.max(SLOT_DURATION_MS, (campaignEnd || endOfTodayWindow(WINDOW_END)).getTime() - Date.now());
+            const timeLeftMs    = Math.max(0, (campaignEnd || endOfTodayWindow(WINDOW_END)).getTime() - Date.now());
             const slotsLeft     = Math.max(1, Math.round(timeLeftMs / (SLOT_DURATION_MS + TRANSITION_MS)));
             const batchPerZap   = Math.max(1, Math.ceil(totalPending / (healthyZaps.length * slotsLeft)));
 

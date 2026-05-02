@@ -11,13 +11,17 @@ const api = axios.create({
  * @param {string} instanceName
  * @param {object|null} proxyConfig - { host, port } para rotear via 4G, ou null para Wi-Fi
  */
-export const createInstance = async (instanceName, proxyConfig = null, withQR = true, phoneNumber = null) => {
+export const createInstance = async (instanceName, proxyConfig = null, withQR = true, phoneNumber = null, pairingMode = false) => {
     const body = {
         instanceName,
         qrcode:      withQR,
         integration: 'WHATSAPP-BAILEYS',
     };
     if (phoneNumber) body.number = phoneNumber.replace(/\D/g, '');
+    if (pairingMode) {
+        body.pairing           = true;
+        body.preferPairingCode = true;
+    }
     if (proxyConfig) {
         body.proxyHost     = proxyConfig.host;
         body.proxyPort     = String(proxyConfig.port);
@@ -28,24 +32,32 @@ export const createInstance = async (instanceName, proxyConfig = null, withQR = 
 };
 
 /**
- * Gera pairing code para conectar sem QR.
- * @param {string} phoneNumber - número completo com DDI, ex: 5511999999999
- * @returns {string|null} código de 8 caracteres ou null em caso de erro
- */
-/**
- * Solicita pairing code à Evolution API para o número informado.
- * Deve ser chamado após createInstance — retorna o código de 8 dígitos.
+ * Solicita pairing code via POST /instance/requestCode (endpoint oficial v2).
+ * Fallback: lê pairingCode do GET /instance/connect.
  */
 export const getPairingCode = async (instanceName, phoneNumber) => {
-    try {
-        const number = String(phoneNumber).replace(/\D/g, '');
-        const { data } = await api.post(`/instance/pairing-code/${instanceName}`, { number });
-        console.log(`[PAIRING] ${instanceName}:`, JSON.stringify(data).slice(0, 200));
-        return data?.pairingCode || data?.code || null;
-    } catch (err) {
-        console.log(`[PAIRING] Erro ${instanceName}: ${err.response?.status} ${err.message}`);
-        return null;
+    const number = String(phoneNumber || '').replace(/\D/g, '');
+
+    // Endpoint oficial de pairing code no Evolution API v2
+    if (number) {
+        try {
+            const { data } = await api.post(`/instance/requestCode/${instanceName}`, { number });
+            console.log(`[PAIRING requestCode] ${instanceName}:`, JSON.stringify(data).slice(0, 200));
+            const code = data?.pairingCode || data?.code || null;
+            if (code && !String(code).startsWith('2@') && String(code).length < 20) return code;
+        } catch (err) {
+            console.log(`[PAIRING requestCode] ${instanceName}: ${err.response?.status} ${err.message}`);
+        }
     }
+
+    // Fallback: GET /instance/connect (funciona com qrcode=true + pairing flags)
+    try {
+        const { data } = await api.get(`/instance/connect/${instanceName}`);
+        const code = data?.pairingCode || null;
+        if (code && !String(code).startsWith('2@') && String(code).length < 20) return code;
+    } catch (_) {}
+
+    return null;
 };
 
 /** Retorna o QR code base64 da instância, ou null se já conectada. */

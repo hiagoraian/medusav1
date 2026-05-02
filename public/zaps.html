@@ -7,28 +7,7 @@
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030; }
 
-        /* ── Agente IA ── */
-        .agent-fab { position: fixed; bottom: 28px; right: 28px; z-index: 900; background: #075e54; color: #fff; border: none; border-radius: 50px; padding: 14px 20px; font-size: 15px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 8px; transition: 0.2s; }
-        .agent-fab:hover { background: #054c44; transform: scale(1.04); }
-        .agent-panel { position: fixed; bottom: 90px; right: 28px; width: 400px; max-height: 560px; background: #fff; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); display: none; flex-direction: column; z-index: 901; overflow: hidden; }
-        .agent-panel.open { display: flex; }
-        .agent-header { background: #075e54; color: #fff; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; }
-        .agent-header h3 { margin: 0; font-size: 15px; }
-        .agent-header span { font-size: 12px; opacity: 0.75; }
-        .agent-clear { background: none; border: 1px solid rgba(255,255,255,0.4); color: #fff; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
-        .agent-clear:hover { background: rgba(255,255,255,0.15); }
-        .agent-messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: #f0f0f0; }
-        .agent-msg { max-width: 88%; padding: 10px 13px; border-radius: 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-        .agent-msg.user { background: #dcf8c6; align-self: flex-end; border-bottom-right-radius: 3px; }
-        .agent-msg.bot  { background: #fff; align-self: flex-start; border-bottom-left-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-        .agent-msg.typing { color: #999; font-style: italic; }
-        .agent-input-row { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #eee; background: #fff; }
-        .agent-input { flex: 1; border: 1px solid #ddd; border-radius: 20px; padding: 9px 14px; font-size: 13px; outline: none; resize: none; max-height: 80px; font-family: inherit; }
-        .agent-input:focus { border-color: #25D366; }
-        .agent-send { background: #25D366; color: #fff; border: none; border-radius: 50%; width: 38px; height: 38px; cursor: pointer; font-size: 17px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: 0.2s; }
-        .agent-send:hover { background: #128C7E; }
-        .agent-send:disabled { background: #ccc; cursor: not-allowed; }
-        .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+.container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
         h1 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 0; }
         .btn { background-color: #25D366; color: white; border: none; padding: 10px 20px; font-size: 14px; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s; }
         .btn:hover { background-color: #128C7E; }
@@ -88,12 +67,13 @@
                 </button>
                 <div id="pairingCodeDisplay" style="display:none;margin-top:16px;text-align:center;">
                     <p style="color:#555;font-size:13px;margin-bottom:6px;">
-                        No emulador: WhatsApp → Dispositivos Conectados → Conectar com número de telefone
+                        WhatsApp → Dispositivos Conectados → Conectar com número de telefone
                     </p>
                     <div id="pairingCodeValue"
-                        style="font-size:36px;font-weight:bold;letter-spacing:6px;color:#075e54;padding:12px;background:#f0fff5;border-radius:8px;">
+                        style="font-size:36px;font-weight:bold;letter-spacing:6px;color:#075e54;padding:12px;background:#f0fff5;border-radius:8px;font-family:monospace;">
                     </div>
-                    <p style="color:#999;font-size:12px;margin-top:8px;">O código expira em ~60 segundos</p>
+                    <p id="pairingCountdown" style="color:#e67e00;font-size:13px;font-weight:bold;margin-top:6px;"></p>
+                    <p id="pairingConnStatus" style="font-size:13px;margin-top:4px;"></p>
                 </div>
             </div>
             <button class="btn btn-danger" onclick="closePairingModal()" style="margin-top:14px;">✖ Fechar</button>
@@ -147,25 +127,8 @@
 
     </div>
 
-    <!-- Agente IA — Zaps -->
-    <div class="agent-panel" id="agentPanel">
-        <div class="agent-header">
-            <div>
-                <h3>🤖 Especialista em Zaps</h3>
-                <span>Cache de sessão · Diagnóstico · Conexão</span>
-            </div>
-            <button class="agent-clear" onclick="clearAgent()">Limpar</button>
-        </div>
-        <div class="agent-messages" id="agentMessages"></div>
-        <div class="agent-input-row">
-            <textarea id="agentInput" class="agent-input" rows="1"
-                placeholder="Ex: Por que meus zaps desconectam? Como manter a sessão por semanas?"></textarea>
-            <button id="agentSend" class="agent-send" onclick="sendAgentMessage()">➤</button>
-        </div>
-    </div>
-    <button class="agent-fab" onclick="toggleAgent()">🤖 Especialista Zaps</button>
 
-    <script>
+<script>
         let qrPollInterval = null;
         let currentQrAccount = null;
 
@@ -244,26 +207,23 @@
                     statusClass = 'status-offline';    statusText = '⬜ Sem sessão';
                 }
 
-                const connectLabel = zap.state === 'open'  ? '✅ Conectado'
-                                   : zap.hasInstance       ? '🔄 Reconectar'
-                                   :                         '📷 Conectar QR';
-
-                const connectDisabled = zap.state === 'open' ? 'disabled' : '';
+                let buttons;
+                if (zap.state === 'open') {
+                    buttons = `
+                        <button class="btn btn-danger" onclick="disconnectZap('${zap.accountId}')">🔴 Desconectar</button>
+                        <button class="btn btn-danger" onclick="deleteZap('${zap.accountId}')" title="Apagar sessão/cache">🗑️</button>`;
+                } else {
+                    const connectLabel = zap.hasInstance ? '🔄 Reconectar' : '📷 Conectar QR';
+                    buttons = `
+                        <button class="btn btn-secondary" onclick="connectZap('${zap.accountId}', '${zap.state}', ${zap.hasInstance})">${connectLabel}</button>
+                        <button class="btn btn-secondary" onclick="connectPairing('${zap.accountId}')" title="Conectar por código">🔢</button>
+                        <button class="btn btn-danger" onclick="deleteZap('${zap.accountId}')" title="Apagar sessão/cache" ${!zap.hasInstance ? 'disabled' : ''}>🗑️</button>`;
+                }
 
                 card.innerHTML = `
                     <h3>${zap.accountId}</h3>
                     <div class="status-badge ${statusClass}">${statusText}</div>
-                    <div class="btn-group">
-                        <button class="btn btn-secondary" ${connectDisabled}
-                            onclick="connectZap('${zap.accountId}', '${zap.state}', ${zap.hasInstance})">
-                            ${connectLabel}
-                        </button>
-                        <button class="btn btn-secondary" ${connectDisabled}
-                            onclick="connectPairing('${zap.accountId}')"
-                            title="Conectar sem câmera via código de 8 dígitos">🔢</button>
-                        <button class="btn btn-danger" onclick="deleteZap('${zap.accountId}')"
-                            title="Apagar sessão/cache" ${!zap.hasInstance ? 'disabled' : ''}>🗑️</button>
-                    </div>`;
+                    <div class="btn-group">${buttons}</div>`;
                 container.appendChild(card);
             });
         }
@@ -312,7 +272,51 @@
             setTimeout(() => document.getElementById('pairingPhone').focus(), 100);
         }
 
+        let _pairingPollInterval    = null;
+        let _pairingCountdownTimer = null;
+
+        function stopPairingPoll() {
+            if (_pairingPollInterval)    { clearInterval(_pairingPollInterval);    _pairingPollInterval    = null; }
+            if (_pairingCountdownTimer) { clearInterval(_pairingCountdownTimer); _pairingCountdownTimer = null; }
+        }
+
+        function startCountdown(seconds) {
+            if (_pairingCountdownTimer) clearInterval(_pairingCountdownTimer);
+            const el = document.getElementById('pairingCountdown');
+            let remaining = seconds;
+            const tick = () => {
+                if (remaining <= 0) {
+                    el.textContent = '⏰ Código expirado — gere um novo código';
+                    el.style.color = '#d32f2f';
+                    clearInterval(_pairingCountdownTimer);
+                    return;
+                }
+                el.style.color  = remaining <= 15 ? '#d32f2f' : '#e67e00';
+                el.textContent  = `⚠️ Digite no WhatsApp agora — ${remaining}s restantes`;
+                remaining--;
+            };
+            tick();
+            _pairingCountdownTimer = setInterval(tick, 1000);
+        }
+
+        function startPairingPoll(accountId) {
+            stopPairingPoll();
+            const statusEl = document.getElementById('pairingConnStatus');
+            _pairingPollInterval = setInterval(async () => {
+                try {
+                    const r = await fetch(`/api/whatsapp/qrcode/${accountId}`);
+                    const d = await r.json();
+                    if (d.state === 'open') {
+                        stopPairingPoll();
+                        statusEl.innerHTML = '<span style="color:#075e54;font-weight:bold;">✅ Conectado com sucesso!</span>';
+                        setTimeout(() => { closePairingModal(); refreshStatus(); }, 1500);
+                    }
+                } catch (_) {}
+            }, 3000);
+        }
+
         function closePairingModal() {
+            stopPairingPoll();
             _pairingAccount = null;
             document.getElementById('pairingModal').classList.remove('active');
         }
@@ -323,7 +327,9 @@
 
             const btn = document.getElementById('btnGetCode');
             btn.disabled    = true;
-            btn.textContent = '⏳ Aguardando (até 20s)...';
+            btn.textContent = '⏳ Aguardando (até 30s)...';
+            stopPairingPoll();
+            document.getElementById('pairingCodeDisplay').style.display = 'none';
 
             try {
                 const res  = await fetch(`/api/whatsapp/pairing-code/${_pairingAccount}`, {
@@ -340,17 +346,37 @@
                     return;
                 }
 
-                document.getElementById('pairingCodeValue').textContent = data.code;
+                // Formata como XXXX-XXXX para facilitar digitação
+                const raw       = data.code || '';
+                const formatted = raw.length === 8 ? raw.slice(0, 4) + '-' + raw.slice(4) : raw;
+                document.getElementById('pairingCodeValue').textContent    = formatted;
+                document.getElementById('pairingConnStatus').textContent   = '⏳ Aguardando conexão...';
                 document.getElementById('pairingCodeDisplay').style.display = 'block';
-                btn.textContent = '🔄 Novo Código';
+                btn.textContent = '🔄 Gerar Novo Código';
                 btn.disabled    = false;
 
-                // Atualiza status após 30s (tempo de parear)
-                setTimeout(refreshStatus, 30_000);
-            } catch (err) {
+                // Countdown de 45s (código sem QR dura ~60s, com margem de segurança)
+                startCountdown(45);
+
+                // Monitora conexão automaticamente
+                startPairingPoll(_pairingAccount);
+                setTimeout(stopPairingPoll, 90_000);
+            } catch (_) {
                 alert('Erro de comunicação com o servidor.');
                 btn.disabled    = false;
                 btn.textContent = 'Gerar Código';
+            }
+        }
+
+        async function disconnectZap(accountId) {
+            if (!confirm(`Desconectar ${accountId}?\n\nO cache será mantido — ele pode reconectar via QR sem apagar a sessão.`)) return;
+            try {
+                const res  = await fetch(`/api/whatsapp/disconnect/${accountId}`, { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || data.error);
+                refreshStatus();
+            } catch (_) {
+                alert('Erro ao desconectar.');
             }
         }
 
@@ -467,79 +493,6 @@
         refreshStatus();
         setInterval(refreshStatus, 10000);
 
-        // ── Agente IA — Zaps ──────────────────────────────────
-        let agentHistory = [];
-        let agentOpen    = false;
-
-        function toggleAgent() {
-            agentOpen = !agentOpen;
-            document.getElementById('agentPanel').classList.toggle('open', agentOpen);
-            if (agentOpen && agentHistory.length === 0) {
-                appendAgentMsg('bot', 'Olá! Sou o especialista em gestão de Zaps. Posso diagnosticar conexões, orientar sobre cache de sessão e ajudar a manter seus zaps ativos por mais tempo.\n\nComo posso ajudar?');
-            }
-        }
-
-        function clearAgent() {
-            agentHistory = [];
-            document.getElementById('agentMessages').innerHTML = '';
-            appendAgentMsg('bot', 'Conversa reiniciada. Como posso ajudar?');
-        }
-
-        function appendAgentMsg(role, text) {
-            const div = document.createElement('div');
-            div.className = `agent-msg ${role}`;
-            div.textContent = text;
-            const msgs = document.getElementById('agentMessages');
-            msgs.appendChild(div);
-            msgs.scrollTop = msgs.scrollHeight;
-            return div;
-        }
-
-        async function sendAgentMessage() {
-            const input = document.getElementById('agentInput');
-            const text  = input.value.trim();
-            if (!text) return;
-
-            input.value   = '';
-            input.style.height = '';
-            document.getElementById('agentSend').disabled = true;
-
-            appendAgentMsg('user', text);
-            const typing = appendAgentMsg('bot typing', 'Analisando...');
-
-            try {
-                const res  = await fetch('/api/agent/zaps', {
-                    method:  'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body:    JSON.stringify({ message: text, history: agentHistory }),
-                });
-                const data = await res.json();
-
-                typing.remove();
-
-                const reply = data.response || data.error || 'Erro ao obter resposta.';
-                appendAgentMsg('bot', reply);
-
-                agentHistory.push({ role: 'user',      content: text  });
-                agentHistory.push({ role: 'assistant',  content: reply });
-                if (agentHistory.length > 20) agentHistory = agentHistory.slice(-20);
-            } catch (_) {
-                typing.remove();
-                appendAgentMsg('bot', 'Erro de conexão com o agente.');
-            } finally {
-                document.getElementById('agentSend').disabled = false;
-                input.focus();
-            }
-        }
-
-        document.getElementById('agentInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAgentMessage(); }
-        });
-
-        document.getElementById('agentInput').addEventListener('input', function () {
-            this.style.height = '';
-            this.style.height = Math.min(this.scrollHeight, 80) + 'px';
-        });
     </script>
 </body>
 </html>
