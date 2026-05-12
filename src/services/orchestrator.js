@@ -1,25 +1,59 @@
 import {
     getPendingMessages, countPending, countPendingInCycle,
-    assignMessagesToCycle, updateCycleStats,
+    assignMessagesToCycle, updateCycleStats, countCycleStats,
 } from './queueService.js';
 import { publishBulk, purgeQueues }                                          from '../queue/producer.js';
 import { startWorkers, stopWorkers, requestWorkerStop, resetWorkerStop }     from '../queue/worker.js';
-import { rotateMobileIPsStaggered, getZapsByGroup, getActiveZteIds }         from './networkController.js';
+import { rotateMobileIPsStaggered, getZapsByZte, ZTE_PAIR_ORDER, getActiveZteIds, getZteForAccount, isZteOnline } from './networkController.js';
 import { runWarmupFor }                                                      from './chipWarmup.js';
 import { generateCampaignReport, clearReports }                              from './reportGenerator.js';
 import * as evolution                                                        from '../evolution/client.js';
 
-const SLOT_DURATION_MS = 18 * 60 * 1000;  // 18 min por slot de grupo
-const TRANSITION_MS    =  5 * 60 * 1000;  // transição/pré-aquecimento entre grupos
-const MSG_MIN_DELAY_S  = 45;              // delay mínimo entre msgs no worker
-const MSG_MAX_DELAY_S  = 90;              // delay máximo entre msgs no worker
+const SLOT_DURATION_MS = 25 * 60 * 1000;  // 25 min por rodada (24 zaps com 6 sub-grupos)
+const TRANSITION_MS    = 11 * 60 * 1000;  // rotação de IP entre rodadas (~10.5 min real)
+const MSG_MIN_DELAY_S  = 90;              // delay mínimo entre msgs no worker
+const MSG_MAX_DELAY_S  = 150;             // delay máximo entre msgs no worker
 
-const SUBGROUP_SIZE = 4;
-const GROUP_ORDER   = ['A', 'B', 'C'];
+const SUBGROUP_SIZE = 4;                  // 24 zaps ÷ 4 = 6 sub-grupos, offset 90s cada
+
+const ADMIN_ZAP    = process.env.ADMIN_ZAP    || 'WA-49';
+const ADMIN_NUMBER = process.env.ADMIN_NUMBER  || '';
+
+const sendAdminReport = async (roundNum, pairLabel, sentThisRound, cycleId, pendingLeft, fallenThisRound) => {
+    if (!ADMIN_NUMBER) return;
+    try {
+        const state = await evolution.getConnectionState(ADMIN_ZAP);
+        if (state !== 'open') { console.log(`[ADMIN] ${ADMIN_ZAP} offline — relatório não enviado.`); return; }
+        const stats  = await countCycleStats(cycleId);
+        const now    = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        const zapsLine = fallenThisRound.size > 0
+            ? `\n🔴 Zaps caídos: ${[...fallenThisRound].join(', ')}`
+            : `\n💚 Todos os zaps ok`;
+        const text  =
+            `📊 *Medusa — Ciclo ${roundNum}*\n\n` +
+            `🕐 ${now}  |  🔁 ${pairLabel}\n\n` +
+            `📬 Pendentes: ${pendingLeft}\n` +
+            `✅ Enviados: ${stats.enviado + stats.invalido}\n` +
+            `❌ Falhas técnicas: ${stats.falha}` +
+            zapsLine +
+            (pendingLeft === 0 ? '\n\n🏁 *Campanha concluída!*' : '');
+        await evolution.sendText(ADMIN_ZAP, ADMIN_NUMBER, text);
+        console.log(`[ADMIN] Relatório ciclo ${roundNum} enviado → ${ADMIN_NUMBER}`);
+    } catch (err) {
+        console.warn(`[ADMIN] Falha ao enviar relatório: ${err.message}`);
+    }
+};
+
+// ── Sistema de reservas ───────────────────────────────────────────────────────
+// Um zap reserva por ZTE — ativado quando o titular do mesmo ZTE cai.
+// Campanha pausa automaticamente ao atingir MAX_FALLEN_BEFORE_PAUSE caídos.
+const RESERVE_ZTE_MAP       = { ZTE1: 'WA-12', ZTE2: 'WA-24', ZTE3: 'WA-36', ZTE4: 'WA-48' };
+const ALL_RESERVES          = new Set(Object.values(RESERVE_ZTE_MAP));
+const MAX_FALLEN_BEFORE_PAUSE = 5;
 
 // ── Health check pré-disparo ──────────────────────────────────────────────────
 // Verifica estado de conexão de cada zap antes de cada onda.
-// Zaps desconectados são removidos daquela onda sem enviar mensagens.
+// Se um zap caiu e seu ZTE está offline, tenta fallback via Wi-Fi antes de descartar.
 const preflightCheck = async (accounts) => {
     const healthy = [];
     const sick    = [];
@@ -31,19 +65,64 @@ const preflightCheck = async (accounts) => {
                 console.log(`✅ [PREFLIGHT] ${id} OK`);
                 healthy.push(id);
             } else {
-                console.warn(`🔴 [PREFLIGHT] ${id} suspenso — estado: ${state}`);
+                console.warn(`🔴 [PREFLIGHT] ${id} offline — estado: ${state}`);
                 sick.push(id);
             }
         } catch (err) {
-            console.warn(`🔴 [PREFLIGHT] ${id} suspenso — ${err.message}`);
+            console.warn(`🔴 [PREFLIGHT] ${id} offline — ${err.message}`);
             sick.push(id);
         }
     }));
 
-    if (sick.length > 0) {
-        console.warn(`⚠️ [PREFLIGHT] ${sick.length} zap(s) suspenso(s): ${sick.join(', ')}`);
+    if (sick.length === 0) return healthy;
+
+    // ── Fallback Wi-Fi: agrupa zaps caídos por ZTE ───────────────────────────
+    const sickByZte = {};
+    const sickNoZte = [];
+    for (const id of sick) {
+        const zteId = getZteForAccount(id);
+        zteId ? (sickByZte[zteId] = [...(sickByZte[zteId] || []), id]) : sickNoZte.push(id);
     }
-    return healthy;
+
+    const recovered = [];
+
+    // Verifica cada ZTE em paralelo — se offline, muda todos os seus zaps para Wi-Fi
+    await Promise.allSettled(Object.entries(sickByZte).map(async ([zteId, ids]) => {
+        const online = await isZteOnline(zteId);
+        if (online) return; // ZTE vivo → queda é do WhatsApp, não do proxy
+
+        console.warn(`🌐 [PREFLIGHT] ${zteId} offline — fallback Wi-Fi em ${ids.length} zap(s)...`);
+
+        // Remove proxy e reinicia todos em paralelo
+        await Promise.allSettled(ids.map(async (id) => {
+            await evolution.clearProxy(id).catch(() => {});
+            await evolution.restartInstance(id).catch(() => {});
+        }));
+
+        // Aguarda reconexão via Wi-Fi (até 15s, checando a cada 3s)
+        for (let t = 0; t < 5; t++) {
+            await new Promise(r => setTimeout(r, 3000));
+            await Promise.allSettled(ids.map(async (id) => {
+                if (recovered.includes(id)) return;
+                const s = await evolution.getConnectionState(id).catch(() => 'close');
+                if (s === 'open') {
+                    console.log(`✅ [PREFLIGHT] ${id} recuperado via Wi-Fi`);
+                    recovered.push(id);
+                }
+            }));
+            if (ids.every(id => recovered.includes(id))) break;
+        }
+
+        const failed = ids.filter(id => !recovered.includes(id));
+        if (failed.length > 0)
+            console.warn(`🔴 [PREFLIGHT] Wi-Fi fallback falhou: ${failed.join(', ')}`);
+    }));
+
+    const allSick = sick.filter(id => !recovered.includes(id));
+    if (allSick.length > 0)
+        console.warn(`⚠️ [PREFLIGHT] ${allSick.length} zap(s) suspenso(s): ${allSick.join(', ')}`);
+
+    return [...healthy, ...recovered];
 };
 
 // Janela diária de disparo — fixo; não exposto via config
@@ -157,17 +236,26 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
 
     resetStop();
 
+    // Separa reservas e admin dos zaps ativos
+    let workingAccounts     = activeAccounts.filter(id => !ALL_RESERVES.has(id) && id !== ADMIN_ZAP);
+    const reservePool       = activeAccounts.filter(id =>  ALL_RESERVES.has(id));
+    const fallenZaps        = new Set();
+    const activatedReserves = new Set();
+
     // Aguarda data/hora de início se agendado
     await waitUntilStartDatetime(startDatetime);
     if (stopRequested) { resetStop(); return; }
 
-    let groupIdx         = 0;
+    let pairIdx          = 0;
     let waveCount        = 0;
     let consecutiveSkips = 0;
+    let roundNum         = 0;
 
-    console.log(`\n🚀 [ORCH] Campanha iniciada`);
-    console.log(`   Zaps: ${activeAccounts.length} | Slot: ${SLOT_DURATION_MS / 60000} min | Aquecimento: ${warmupLevel}`);
+    console.log(`\n🚀 [ORCH] Campanha iniciada — modo par de ZTEs`);
+    console.log(`   Zaps: ${workingAccounts.length} ativos + ${reservePool.length} reserva(s) | Slot: ${SLOT_DURATION_MS / 60000} min | Aquecimento: ${warmupLevel}`);
+    console.log(`   Reservas: ${reservePool.join(', ') || 'nenhuma'} | Pausa após: ${MAX_FALLEN_BEFORE_PAUSE} caídos`);
     console.log(`   Janela: ${WINDOW_START}–${WINDOW_END} | Fim: ${campaignEnd ? campaignEnd.toLocaleString('pt-BR') : 'sem limite'}`);
+    console.log(`   Rodada 1: ${ZTE_PAIR_ORDER[0].join('+')} | Rodada 2: ${ZTE_PAIR_ORDER[1].join('+')}`);
 
     while (!stopRequested) {
         // ── Fim por data ──────────────────────────────────────────────────────
@@ -188,45 +276,84 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
             if (stopRequested || (campaignEnd && Date.now() >= campaignEnd.getTime())) break;
         }
 
-        // ── Determina grupo ativo ─────────────────────────────────────────────
-        const groupLetter = GROUP_ORDER[groupIdx % 3];
-        const groupZaps   = getZapsByGroup(groupLetter).filter(id => activeAccounts.includes(id));
-        const otherZaps   = activeAccounts.filter(id => !groupZaps.includes(id));
+        // ── Determina par de ZTEs ativo ───────────────────────────────────────
+        const pairZtes  = ZTE_PAIR_ORDER[pairIdx % 2];
+        const pairLabel = pairZtes.join('+');
+        let pairZaps    = pairZtes.flatMap(zteId => getZapsByZte(zteId))
+                                  .filter(id => workingAccounts.includes(id));
+        const otherZaps = workingAccounts.filter(id => !pairZaps.includes(id));
 
-        if (groupZaps.length === 0) {
-            console.warn(`⚠️ [ORCH] Grupo ${groupLetter} sem zaps ativos. Avançando para próximo grupo.`);
+        if (pairZaps.length === 0) {
+            console.warn(`⚠️ [ORCH] Par ${pairLabel} sem zaps ativos. Avançando para próximo par.`);
             consecutiveSkips++;
-            if (consecutiveSkips >= 3) {
-                console.error('🔴 [ORCH] Nenhum grupo com zaps ativos. Encerrando campanha.');
+            if (consecutiveSkips >= 2) {
+                console.error('🔴 [ORCH] Nenhum par com zaps ativos. Encerrando campanha.');
                 break;
             }
-            groupIdx++;
+            pairIdx++;
             continue;
         }
         consecutiveSkips = 0;
 
-        // Slot de 18 min, limitado pelo fim da janela/campanha
+        // Slot de 25 min, limitado pelo fim da janela/campanha
         const blockEnd = new Date(Math.min(
             Date.now() + SLOT_DURATION_MS,
             testMode ? Infinity : endOfTodayWindow(WINDOW_END).getTime(),
             campaignEnd ? campaignEnd.getTime() : Infinity,
         ));
 
-        console.log(`\n🔤 [ORCH] Bloco ${groupLetter} — ${groupZaps.length} zaps — até ${blockEnd.toLocaleTimeString('pt-BR')}`);
+        console.log(`\n🔤 [ORCH] Rodada ${pairLabel} — ${pairZaps.length} zaps — até ${blockEnd.toLocaleTimeString('pt-BR')}`);
+
+        const pendingBeforeRound = await countPending();
+        const fallenThisRound   = new Set();
 
         // ── Ondas dentro do bloco ─────────────────────────────────────────────
         while (!stopRequested && Date.now() < blockEnd.getTime()) {
             if (!testMode && !isWithinWindow(WINDOW_START, WINDOW_END)) break;
 
             // ── Health check: remove zaps que não conseguem enviar ────────────
-            console.log(`  🔍 [PREFLIGHT] Verificando ${groupZaps.length} zap(s)...`);
-            const healthyZaps = await preflightCheck(groupZaps);
+            console.log(`  🔍 [PREFLIGHT] Verificando ${pairZaps.length} zap(s)...`);
+            const healthyZaps = await preflightCheck(pairZaps);
+
+            // ── Sistema de reservas: detecta novos caídos e ativa substitutos ──
+            const newlyFallen = pairZaps.filter(id => !healthyZaps.includes(id) && !fallenZaps.has(id));
+            for (const fallen of newlyFallen) {
+                fallenZaps.add(fallen);
+                fallenThisRound.add(fallen);
+                console.warn(`🔴 [RESERVE] ${fallen} caiu — total caídos: ${fallenZaps.size}/${MAX_FALLEN_BEFORE_PAUSE}`);
+
+                const zteId     = getZteForAccount(fallen);
+                const reserveId = zteId ? RESERVE_ZTE_MAP[zteId] : null;
+                if (reserveId && reservePool.includes(reserveId) && !activatedReserves.has(reserveId)) {
+                    const state = await evolution.getConnectionState(reserveId);
+                    if (state === 'open') {
+                        workingAccounts.push(reserveId);
+                        activatedReserves.add(reserveId);
+                        console.log(`✅ [RESERVE] ${reserveId} ativado como reserva de ${fallen} (${zteId})`);
+                        // Inclui na onda atual se for do mesmo par de ZTEs
+                        if (pairZtes.includes(zteId)) {
+                            pairZaps = [...pairZaps, reserveId];
+                        }
+                    } else {
+                        fallenZaps.add(reserveId);
+                        console.warn(`⚠️ [RESERVE] ${reserveId} offline (${state}) — contabilizado como caído. Total: ${fallenZaps.size}/${MAX_FALLEN_BEFORE_PAUSE}`);
+                    }
+                }
+
+                if (fallenZaps.size >= MAX_FALLEN_BEFORE_PAUSE) {
+                    console.error(`🛑 [RESERVE] ${MAX_FALLEN_BEFORE_PAUSE} zaps caídos. Pausando campanha automaticamente.`);
+                    requestStop();
+                    break;
+                }
+            }
+            if (stopRequested) break;
+
             if (healthyZaps.length === 0) {
                 console.error('🔴 [ORCH] Nenhum zap passou no preflight. Encerrando bloco.');
                 break;
             }
-            if (healthyZaps.length < groupZaps.length) {
-                console.warn(`⚠️ [ORCH] Continuando com ${healthyZaps.length}/${groupZaps.length} zap(s) saudáveis.`);
+            if (healthyZaps.length < pairZaps.length) {
+                console.warn(`⚠️ [ORCH] Continuando com ${healthyZaps.length}/${pairZaps.length} zap(s) saudáveis.`);
             }
 
             // Calcula dinamicamente quantas msgs por zap neste slot
@@ -241,10 +368,9 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
             await assignMessagesToCycle(batch.map(r => r.id), cycleId);
 
             const offsets = buildSubGroupOffsets(healthyZaps, MSG_MIN_DELAY_S * 1_000);
-            const numSubs = Math.ceil(healthyZaps.length / SUBGROUP_SIZE);
             waveCount++;
 
-            console.log(`  🌊 Onda ${waveCount} [Grupo ${groupLetter}] — ${batch.length} msgs — ${healthyZaps.length} zap(s) — ${batchPerZap}/zap — slots restantes ~${slotsLeft}`);
+            console.log(`  🌊 Onda ${waveCount} [${pairLabel}] — ${batch.length} msgs — ${healthyZaps.length} zap(s) — ${batchPerZap}/zap — slots restantes ~${slotsLeft}`);
 
             const waveStartMs = Date.now();
             await publishBulk(batch, healthyZaps);
@@ -265,21 +391,21 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
             const remaining  = await countPending();
             if (remaining === 0) break;
 
-            let pauseSec = TRANSITION_MS / 1000;
+            let pauseSec = 30;
             if (campaignEnd) {
-                const timeLeftMs   = campaignEnd.getTime() - Date.now();
+                const timeLeftMs2  = campaignEnd.getTime() - Date.now();
                 const wavesLeft    = Math.max(1, Math.ceil(remaining / batch.length));
-                const idealPauseMs = Math.max(0, (timeLeftMs / wavesLeft) - waveDurMs);
+                const idealPauseMs = Math.max(0, (timeLeftMs2 / wavesLeft) - waveDurMs);
                 pauseSec = Math.max(30, Math.floor(idealPauseMs / 1000));
                 console.log(`  ⏱️  Pacing: ${remaining} restantes, ~${wavesLeft} ondas, pausa ideal ${Math.round(idealPauseMs / 1000)}s`);
             }
 
-            // Cap: não ultrapassa o fim do bloco (deixa 60 s de margem)
+            // Cap: não ultrapassa o fim do bloco (deixa 60s de margem)
             const timeLeft = blockEnd.getTime() - Date.now();
             pauseSec = Math.min(pauseSec, Math.max(0, Math.floor(timeLeft / 1000) - 60));
 
             if (pauseSec > 30 && otherZaps.length >= 2) {
-                console.log(`  🔥 Aquecimento grupos inativos (${pauseSec}s)...`);
+                console.log(`  🔥 Aquecimento par inativo (${pauseSec}s)...`);
                 await runWarmupFor(otherZaps, warmupLevel, pauseSec);
             } else if (pauseSec > 5) {
                 console.log(`  ⏳ Pausa entre ondas (${pauseSec}s)...`);
@@ -290,25 +416,32 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
         // ── Interrompido pelo usuário ─────────────────────────────────────────
         if (stopRequested) {
             await updateCycleStats(cycleId, 0, 0, 'interrompido');
-            await purgeQueues(activeAccounts);
+            await purgeQueues(workingAccounts);
             console.log('\n🛑 [ORCH] Campanha interrompida pelo usuário.');
             break;
         }
 
+        // ── Relatório de ciclo para o admin ──────────────────────────────────
+        roundNum++;
+        const pendingAfterRound  = await countPending();
+        const sentThisRound      = pendingBeforeRound - pendingAfterRound;
+        await sendAdminReport(roundNum, pairLabel, sentThisRound, cycleId, pendingAfterRound, fallenThisRound);
+
         // Fila zerou dentro do bloco
-        if ((await countPending()) === 0) break;
+        if (pendingAfterRound === 0) break;
 
-        // ── Transição de grupo ────────────────────────────────────────────────
-        groupIdx++;
-        const nextLetter = GROUP_ORDER[groupIdx % 3];
-        const nextZaps   = getZapsByGroup(nextLetter).filter(id => activeAccounts.includes(id));
+        // ── Transição de par: rotaciona IPs de todos os ZTEs ─────────────────
+        pairIdx++;
+        const nextPairZtes = ZTE_PAIR_ORDER[pairIdx % 2];
+        const nextPairZaps = nextPairZtes.flatMap(zteId => getZapsByZte(zteId))
+                                         .filter(id => workingAccounts.includes(id));
 
-        console.log(`\n🔄 [ORCH] Transição → Grupo ${nextLetter} | Rotacionando IPs (escalonado)...`);
+        console.log(`\n🔄 [ORCH] Transição → ${nextPairZtes.join('+')} | Rotacionando IPs...`);
         await rotateMobileIPsStaggered(getActiveZteIds());
 
-        if (nextZaps.length >= 2 && !stopRequested) {
-            console.log(`  🔥 Pré-aquecimento Grupo ${nextLetter} (5 min)...`);
-            await runWarmupFor(nextZaps, warmupLevel, 300);
+        if (nextPairZaps.length >= 2 && !stopRequested) {
+            console.log(`  🔥 Pré-aquecimento ${nextPairZtes.join('+')} (2 min)...`);
+            await runWarmupFor(nextPairZaps, warmupLevel, 120);
         }
     }
 

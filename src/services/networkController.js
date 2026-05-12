@@ -1,6 +1,7 @@
 import { exec } from 'child_process';
 import util from 'util';
 import os from 'os';
+import * as evolution from '../evolution/client.js';
 
 const execPromise = util.promisify(exec);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -9,10 +10,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // Cada ZTE gerencia 12 zaps divididos em 3 grupos (A/B/C) de 4 zaps cada.
 // O orchestrator cicla A→B→C, rotacionando IP do ZTE entre cada bloco.
 // Serials lidos do .env — nunca commitados (específicos de cada máquina).
+// port      = porta ADB forward (127.0.0.1 apenas — usada para checar 4G localmente)
+// dockerPort = porta exposta em 0.0.0.0 via netsh portproxy — acessível pelo Docker
 const ZTE_CONFIG = {
     ZTE1: {
         serial:      process.env.ZTE_1_SERIAL || '',
-        port:        8080,
+        port:        8085,
+        dockerPort:  9085,
         description: 'ZTE 1 (Zaps 1–12)',
         groups: {
             A: ['WA-01', 'WA-02', 'WA-03', 'WA-04'],
@@ -22,7 +26,8 @@ const ZTE_CONFIG = {
     },
     ZTE2: {
         serial:      process.env.ZTE_2_SERIAL || '',
-        port:        8081,
+        port:        8086,
+        dockerPort:  9086,
         description: 'ZTE 2 (Zaps 13–24)',
         groups: {
             A: ['WA-13', 'WA-14', 'WA-15', 'WA-16'],
@@ -32,7 +37,8 @@ const ZTE_CONFIG = {
     },
     ZTE3: {
         serial:      process.env.ZTE_3_SERIAL || '',
-        port:        8082,
+        port:        8087,
+        dockerPort:  9087,
         description: 'ZTE 3 (Zaps 25–36)',
         groups: {
             A: ['WA-25', 'WA-26', 'WA-27', 'WA-28'],
@@ -42,7 +48,8 @@ const ZTE_CONFIG = {
     },
     ZTE4: {
         serial:      process.env.ZTE_4_SERIAL || '',
-        port:        8083,
+        port:        8088,
+        dockerPort:  9088,
         description: 'ZTE 4 (Zaps 37–48)',
         groups: {
             A: ['WA-37', 'WA-38', 'WA-39', 'WA-40'],
@@ -77,6 +84,20 @@ export const getGroupForAccount = (accountId) => {
 // Retorna todos os accountIds de um grupo (A, B ou C) em todos os ZTEs
 export const getZapsByGroup = (groupLetter) =>
     Object.values(ZTE_CONFIG).flatMap(cfg => cfg.groups[groupLetter] || []);
+
+// Retorna todos os zaps de um ZTE específico (todos os grupos A+B+C)
+export const getZapsByZte = (zteId) => {
+    const cfg = ZTE_CONFIG[zteId];
+    if (!cfg) return [];
+    return Object.values(cfg.groups).flat();
+};
+
+// Pares de ZTEs para disparo em modo duplo:
+// Rodada 1: ZTE1 + ZTE3 (24 zaps), Rodada 2: ZTE2 + ZTE4 (24 zaps)
+export const ZTE_PAIR_ORDER = [
+    ['ZTE1', 'ZTE3'],
+    ['ZTE2', 'ZTE4'],
+];
 
 // Retorna todos os IDs de ZTE configurados
 export const getActiveZteIds = () => Object.keys(ZTE_CONFIG);
@@ -135,7 +156,7 @@ export const setupAdbForward = async (port, serial, retries = 3) => {
         return false;
     }
     for (let i = 1; i <= retries; i++) {
-        const r = await adb(serial, `forward tcp:${port} tcp:${port}`);
+        const r = await adb(serial, `forward tcp:${port} tcp:8080`);
         if (r.ok) {
             console.log(`✅ [ADB] Forward ${serial} → :${port}`);
             return true;
@@ -146,17 +167,54 @@ export const setupAdbForward = async (port, serial, retries = 3) => {
     return false;
 };
 
+// Expõe a porta ADB (loopback) em 0.0.0.0 via netsh portproxy para que o Docker acesse.
+// Requer privilégios de Administrador no Windows.
+export const setupNetshProxy = async (adbPort, dockerPort) => {
+    if (os.platform() !== 'win32') return true;
+    try {
+        await execPromise(
+            `netsh interface portproxy delete v4tov4 listenport=${dockerPort} listenaddress=0.0.0.0`
+        ).catch(() => {});
+        await execPromise(
+            `netsh interface portproxy add v4tov4 listenport=${dockerPort} listenaddress=0.0.0.0 connectport=${adbPort} connectaddress=127.0.0.1`
+        );
+        console.log(`✅ [NETSH] Portproxy :${dockerPort} → 127.0.0.1:${adbPort}`);
+        return true;
+    } catch (err) {
+        console.warn(`⚠️ [NETSH] Portproxy :${dockerPort} não configurado. Use scripts/iniciar_medusa.ps1 para ativar 4G no Docker.`);
+        return false;
+    }
+};
+
 export const setupAllAdbForwards = async () => {
     if (!await checkAdbAvailability()) return false;
     let ok = true;
     for (const cfg of Object.values(ZTE_CONFIG)) {
-        if (!cfg.serial) continue; // pula ZTE sem serial configurado
-        if (!await setupAdbForward(cfg.port, cfg.serial)) ok = false;
+        if (!cfg.serial) continue;
+        const adbOk = await setupAdbForward(cfg.port, cfg.serial);
+        if (!adbOk) { ok = false; continue; }
+        await setupNetshProxy(cfg.port, cfg.dockerPort);
     }
     return ok;
 };
 
+// Retorna config de proxy para um account sem verificar conectividade 4G
+export const getStaticProxyForAccount = (accountId) => {
+    const zteId = getZteForAccount(accountId);
+    if (!zteId) return null;
+    const cfg = ZTE_CONFIG[zteId];
+    if (!cfg.serial) return null;
+    return { host: 'host.docker.internal', port: cfg.dockerPort };
+};
+
 // ── Proxy / Conexão 4G ────────────────────────────────────────────────────────
+
+// Verifica se um ZTE específico está online (4G acessível via proxy local)
+export const isZteOnline = async (zteId) => {
+    const cfg = ZTE_CONFIG[zteId];
+    if (!cfg || !cfg.serial) return false;
+    return isMobileConnectionActive(cfg.port);
+};
 
 export const isMobileConnectionActive = async (port) => {
     try {
@@ -178,8 +236,8 @@ export const getProxyConfigForAccount = async (accountId) => {
     if (!cfg.serial) return null;
     const active = await isMobileConnectionActive(cfg.port);
     if (active) {
-        console.log(`[NET] ${accountId} → 4G (porta ${cfg.port})`);
-        return { host: 'host.docker.internal', port: cfg.port };
+        console.log(`[NET] ${accountId} → 4G (porta docker ${cfg.dockerPort})`);
+        return { host: 'host.docker.internal', port: cfg.dockerPort };
     }
     console.warn(`⚠️ [NET] ${accountId} → 4G indisponível na porta ${cfg.port}. Usando Wi-Fi.`);
     return null;
@@ -212,10 +270,16 @@ export const rotateZteIP = async (zteId) => {
     await sleep(120000);
 
     const ok = await isMobileConnectionActive(cfg.port);
-    console.log(ok
-        ? `✅ [ROTATE] ${cfg.description} reconectado com novo IP.`
-        : `⚠️ [ROTATE] ${cfg.description} não reconectou no 4G. Seguindo com Wi-Fi.`
-    );
+    const accounts = Object.values(cfg.groups).flat();
+
+    if (ok) {
+        console.log(`✅ [ROTATE] ${cfg.description} reconectado com novo IP. Re-aplicando proxy 4G...`);
+        const proxy = { host: 'host.docker.internal', port: cfg.dockerPort };
+        await Promise.allSettled(accounts.map(id => evolution.setProxy(id, proxy).catch(() => {})));
+    } else {
+        console.warn(`⚠️ [ROTATE] ${cfg.description} não reconectou no 4G. Removendo proxy — usando Wi-Fi.`);
+        await Promise.allSettled(accounts.map(id => evolution.clearProxy(id)));
+    }
     return ok;
 };
 

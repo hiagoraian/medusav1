@@ -8,7 +8,9 @@
     "dev": "node --env-file=.env --watch server.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:node": "node --test src/tests/*.test.js"
+    "test:node": "node --test src/tests/*.test.js",
+    "backup": "powershell -NonInteractive -File scripts/backup.ps1",
+    "restore": "powershell -File scripts/restore.ps1"
   },
   "keywords": [],
   "author": "",

@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestão de Listas — Medusa</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; color: #222; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  header {
+    background: #1a237e; color: #fff; padding: 13px 22px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 { font-size: 17px; font-weight: 700; }
+  header nav a { color: rgba(255,255,255,0.82); text-decoration: none; font-size: 13px; margin-left: 16px; }
+  header nav a:hover { color: #fff; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    background: #fff;
+    border-right: 1px solid #e0e0e0;
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+    padding: 16px;
+    gap: 14px;
+  }
+
+  .sec-title {
+    font-size: 11px; font-weight: 700; color: #999; text-transform: uppercase;
+    letter-spacing: 0.7px; margin-bottom: 8px;
+  }
+
+  .ops-block {
+    border: 1px solid #e8eaf6; border-radius: 8px;
+    padding: 12px; background: #fafbff;
+  }
+  .ops-block + .ops-block { margin-top: 10px; }
+  .ops-title { font-size: 13px; font-weight: 700; color: #3949ab; margin-bottom: 4px; }
+  .ops-hint  { font-size: 11px; color: #aaa; margin-bottom: 8px; line-height: 1.4; }
+  .ops-row   { display: flex; gap: 6px; align-items: flex-end; }
+  .ops-field { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+  .ops-field label { font-size: 10px; color: #888; font-weight: 600; }
+  .ops-field input {
+    padding: 6px 8px; border: 1px solid #ddd; border-radius: 5px;
+    font-size: 12px; width: 100%;
+  }
+  .msg { margin-top: 7px; font-size: 11px; padding: 5px 8px; border-radius: 5px; line-height: 1.4; }
+  .msg.ok  { background: #e8f5e9; color: #2e7d32; }
+  .msg.err { background: #ffebee; color: #c62828; }
+
+  .upload-row { display: flex; gap: 6px; }
+  .upload-row label, .upload-row button {
+    flex: 1; padding: 8px 6px; border-radius: 6px; border: none; cursor: pointer;
+    font-size: 12px; font-weight: 600; text-align: center;
+  }
+  .btn-upload { background: #e8eaf6; color: #3949ab; }
+  .btn-upload:hover { background: #c5cae9; }
+  .btn-new { background: #e8f5e9; color: #2e7d32; }
+  .btn-new:hover { background: #c8e6c9; }
+
+  .new-list-form { display: flex; gap: 6px; margin-top: 8px; }
+  .new-list-form input { flex: 1; padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; }
+
+  /* ── Main area ── */
+  .main {
+    display: flex; flex-direction: column;
+    overflow: hidden; padding: 16px; gap: 14px;
+  }
+
+  /* ── Lists grid ── */
+  .lists-card {
+    background: #fff; border-radius: 10px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.07);
+    padding: 14px; flex-shrink: 0;
+  }
+  .lists-top {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  }
+  .lists-top h3 { font-size: 14px; font-weight: 700; color: #1a237e; flex: 1; }
+  .lists-top span { font-size: 12px; color: #aaa; }
+
+  .sel-btns { display: flex; gap: 5px; }
+  .sel-btns button { font-size: 11px; padding: 3px 9px; }
+
+  .lists-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+
+  .list-card {
+    border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 10px 12px; background: #fafafa;
+    cursor: pointer; transition: border-color 0.15s, background 0.15s;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .list-card:hover { background: #f0f4ff; border-color: #9fa8da; }
+  .list-card.selected { background: #e8eaf6; border-color: #3949ab; }
+
+  .list-card-top { display: flex; align-items: center; gap: 6px; }
+  .list-card-top input[type=checkbox] { flex-shrink: 0; cursor: pointer; width: 14px; height: 14px; }
+  .list-card-name { flex: 1; font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .list-card-del { background: none; border: none; cursor: pointer; color: #ddd; font-size: 14px; padding: 0; flex-shrink: 0; }
+  .list-card-del:hover { color: #d32f2f; }
+
+  .list-card-meta { font-size: 11px; color: #888; }
+
+  .list-card-bottom { display: flex; align-items: center; gap: 6px; }
+  .badge { font-size: 9px; padding: 2px 5px; border-radius: 3px; font-weight: 700; }
+  .badge-temp    { background: #fff3e0; color: #e65100; }
+  .badge-oficial { background: #e8f5e9; color: #2e7d32; }
+
+  .toggle-wrap { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  .toggle-lbl  { font-size: 10px; color: #aaa; }
+  .toggle { position: relative; width: 32px; height: 18px; cursor: pointer; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; background: #ccc; border-radius: 18px; transition: background 0.2s; }
+  .slider::before {
+    content: ''; position: absolute; height: 12px; width: 12px;
+    left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: transform 0.2s;
+  }
+  .toggle input:checked + .slider { background: #43a047; }
+  .toggle input:checked + .slider::before { transform: translateX(14px); }
+
+  /* ── Contacts panel ── */
+  .contacts-card {
+    background: #fff; border-radius: 10px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.07);
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+    padding: 14px;
+  }
+
+  .contacts-hdr {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-shrink: 0; flex-wrap: wrap;
+  }
+  .contacts-hdr h3 { font-size: 14px; font-weight: 700; color: #1a237e; flex: 1; }
+
+  .add-row { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+  .add-row input {
+    padding: 7px 10px; border: 1px solid #ddd; border-radius: 6px;
+    font-size: 13px; width: 190px;
+  }
+  .search-box {
+    padding: 7px 10px; border: 1px solid #ddd; border-radius: 6px;
+    font-size: 13px; width: 180px;
+  }
+
+  .table-wrap { flex: 1; overflow-y: auto; border: 1px solid #eee; border-radius: 7px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f5f5f5; padding: 8px 12px; text-align: left; font-weight: 600; position: sticky; top: 0; z-index: 1; }
+  td { padding: 6px 12px; border-bottom: 1px solid #f0f0f0; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafafa; }
+  td .rm-btn { background: none; border: none; cursor: pointer; color: #d32f2f; font-size: 14px; padding: 0; }
+
+  .empty-state { color: #ccc; font-size: 13px; text-align: center; padding: 50px 20px; line-height: 1.8; }
+  .empty-small { color: #ccc; font-size: 13px; text-align: center; padding: 20px; }
+
+  .pagination { display: flex; align-items: center; justify-content: space-between; padding-top: 8px; font-size: 12px; color: #888; flex-shrink: 0; }
+  .pagination button { padding: 5px 12px; font-size: 12px; }
+
+  /* Generic buttons */
+  .btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; }
+  .btn-primary   { background: #3949ab; color: #fff; }
+  .btn-primary:hover   { background: #283593; }
+  .btn-secondary { background: #eee; color: #333; }
+  .btn-secondary:hover { background: #ddd; }
+  .btn-success   { background: #2e7d32; color: #fff; }
+  .btn-success:hover   { background: #1b5e20; }
+
+  #addMsg { font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📋 Gestão de Listas</h1>
+  <nav>
+    <a href="/">🏠 Campanha</a>
+    <a href="/zaps.html">📱 Zaps</a>
+    <a href="/aquecimento.html">🔥 Aquecimento</a>
+  </nav>
+</header>
+
+<div class="layout">
+
+  <!-- ── SIDEBAR: operações ── -->
+  <div class="sidebar">
+
+    <div>
+      <div class="sec-title">📥 Arquivos</div>
+      <div class="upload-row">
+        <label class="btn-upload">
+          📂 Upload .xlsx
+          <input type="file" id="uploadInput" accept=".xlsx,.xls" multiple style="display:none" onchange="uploadFiles(this)">
+        </label>
+        <button class="btn-new" onclick="showNewForm()">+ Nova lista</button>
+      </div>
+      <div class="new-list-form" id="newListForm" style="display:none">
+        <input type="text" id="newListName" placeholder="Nome (sem .xlsx)" maxlength="80"
+               onkeydown="if(event.key==='Enter') createList(); if(event.key==='Escape') hideNewForm()">
+        <button class="btn btn-primary" onclick="createList()">OK</button>
+        <button class="btn btn-secondary" onclick="hideNewForm()">✕</button>
+      </div>
+      <div id="uploadMsg" class="msg" style="display:none; margin-top:8px;"></div>
+    </div>
+
+    <div>
+      <div class="sec-title">⚙️ Operações</div>
+
+      <div class="ops-block">
+        <div class="ops-title">🔀 Mesclar Listas</div>
+        <div class="ops-hint">Marque 2 ou mais listas (☑) e informe o nome do resultado.</div>
+        <div class="ops-row">
+          <div class="ops-field">
+            <label>Nome do arquivo</label>
+            <input type="text" id="mergeOutput" placeholder="Mesclagem" maxlength="60">
+          </div>
+          <button class="btn btn-primary" onclick="doMerge()" style="white-space:nowrap">Mesclar</button>
+        </div>
+        <div id="mergeMsg" class="msg" style="display:none"></div>
+      </div>
+
+      <div class="ops-block">
+        <div class="ops-title">✂️ Dividir Lista</div>
+        <div class="ops-hint">Marque exatamente 1 lista (☑) e escolha em quantas partes dividir.</div>
+        <div class="ops-row">
+          <div class="ops-field">
+            <label>Número de partes</label>
+            <input type="number" id="splitN" value="2" min="2" max="50">
+          </div>
+          <button class="btn btn-primary" onclick="doSplit()" style="white-space:nowrap">Dividir</button>
+        </div>
+        <div id="splitMsg" class="msg" style="display:none"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── MAIN ── -->
+  <div class="main">
+
+    <!-- Listas (cards) -->
+    <div class="lists-card">
+      <div class="lists-top">
+        <h3>📁 Listas</h3>
+        <span id="listCount"></span>
+        <div class="sel-btns">
+          <button class="btn btn-secondary" onclick="selectAll(true)">☑ Todas</button>
+          <button class="btn btn-secondary" onclick="selectAll(false)">☐ Nenhuma</button>
+          <button class="btn" style="background:#d32f2f;color:#fff;" onclick="deleteSelected()">🗑 Excluir Selecionadas</button>
+        </div>
+      </div>
+      <div class="lists-grid" id="listsGrid">
+        <div class="empty-small">Carregando...</div>
+      </div>
+    </div>
+
+    <!-- Contatos da lista selecionada -->
+    <div class="contacts-card">
+      <div class="contacts-hdr">
+        <h3 id="contactsTitle">Clique em uma lista para ver os contatos</h3>
+        <input class="search-box" type="text" id="searchBox" placeholder="🔍 Buscar número..."
+               oninput="onSearch()" style="display:none">
+      </div>
+
+      <!-- Add row (só aparece quando lista selecionada) -->
+      <div class="add-row" id="addRow" style="display:none; margin-bottom:10px;">
+        <input type="text" id="addInput" placeholder="Ex: 5511999990001" maxlength="15"
+               onkeydown="if(event.key==='Enter') addPhone()">
+        <button class="btn btn-success" onclick="addPhone()">+ Adicionar</button>
+        <span id="addMsg"></span>
+      </div>
+
+      <div class="table-wrap" id="tableWrap">
+        <div class="empty-state">
+          Selecione uma lista acima para visualizar e editar seus contatos.
+        </div>
+      </div>
+
+      <div class="pagination" id="pagination" style="display:none">
+        <button class="btn btn-secondary" id="btnPrev" onclick="changePage(-1)">◀ Anterior</button>
+        <span id="pageInfo"></span>
+        <button class="btn btn-secondary" id="btnNext" onclick="changePage(1)">Próxima ▶</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let _lists        = [];
+let _selected     = null;
+let _page         = 1;
+const PAGE_SIZE   = 100;
+let _q            = '';
+
+// ── Lists ────────────────────────────────────────────────────────────────────
+
+async function loadLists() {
+    const res = await fetch('/api/list-mgmt').catch(() => null);
+    if (!res?.ok) return;
+    _lists = await res.json();
+    renderLists();
+    if (_selected && _lists.find(l => l.name === _selected))
+        loadContacts(_selected, true);
+}
+
+function renderLists() {
+    const el = document.getElementById('listsGrid');
+    document.getElementById('listCount').textContent = `${_lists.length} lista(s)`;
+
+    if (!_lists.length) {
+        el.innerHTML = '<div class="empty-small">Nenhuma lista. Faça upload de um .xlsx ou crie uma nova.</div>';
+        return;
+    }
+
+    el.innerHTML = _lists.map(l => `
+      <div class="list-card ${l.name === _selected ? 'selected' : ''}" onclick="loadContacts('${esc(l.name)}')">
+        <div class="list-card-top">
+          <input type="checkbox" class="list-cb" value="${esc(l.name)}"
+                 onclick="event.stopPropagation()">
+          <span class="list-card-name" title="${esc(l.name)}">📄 ${esc(l.name)}</span>
+          <button class="list-card-del" onclick="event.stopPropagation(); deleteList('${esc(l.name)}')" title="Excluir">🗑</button>
+        </div>
+        <div class="list-card-meta">${l.count.toLocaleString()} contatos · ${fmtSize(l.size)}</div>
+        <div class="list-card-bottom">
+          <span class="badge ${l.isTemp ? 'badge-temp' : 'badge-oficial'}">${l.isTemp ? 'Temp' : 'Oficial'}</span>
+          <div class="toggle-wrap" title="${l.active ? 'Habilitada para painel de campanha' : 'Desabilitada'}" onclick="event.stopPropagation()">
+            <span class="toggle-lbl">Painel</span>
+            <label class="toggle">
+              <input type="checkbox" ${l.active ? 'checked' : ''}
+                     onchange="toggleActive('${esc(l.name)}', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+    `).join('');
+}
+
+// ── Contacts ────────────────────────────────────────────────────────────────
+
+async function loadContacts(filename, keepPage = false) {
+    _selected = filename;
+    if (!keepPage) { _page = 1; _q = ''; document.getElementById('searchBox').value = ''; }
+    renderLists();
+
+    document.getElementById('contactsTitle').textContent = `📄 ${filename}`;
+    document.getElementById('searchBox').style.display = '';
+    document.getElementById('addRow').style.display = '';
+
+    const url = `/api/list-mgmt/${encodeURIComponent(filename)}/contacts?page=${_page}&pageSize=${PAGE_SIZE}&q=${encodeURIComponent(_q)}`;
+    const res = await fetch(url).catch(() => null);
+    if (!res?.ok) return;
+    const data = await res.json();
+    renderTable(data.phones, data.total);
+    renderPagination(data.total, data.page);
+}
+
+function renderTable(phones, total) {
+    const el = document.getElementById('tableWrap');
+    if (!phones.length) {
+        el.innerHTML = `<div class="empty-small">${_q ? 'Nenhum resultado para "' + esc(_q) + '".' : 'Lista vazia — adicione contatos pelo campo acima.'}</div>`;
+        return;
+    }
+    el.innerHTML = `
+      <table>
+        <thead><tr><th style="width:52px">#</th><th>Número</th><th style="width:42px"></th></tr></thead>
+        <tbody>
+          ${phones.map((p, i) => `
+            <tr>
+              <td style="color:#ccc;font-size:11px">${(_page - 1) * PAGE_SIZE + i + 1}</td>
+              <td><code style="font-size:13px">${esc(p)}</code></td>
+              <td><button class="rm-btn" onclick="removePhone('${esc(p)}')" title="Remover">🗑</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+}
+
+function renderPagination(total, page) {
+    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const el = document.getElementById('pagination');
+    el.style.display = total > PAGE_SIZE ? '' : 'none';
+    document.getElementById('pageInfo').textContent = `Página ${page} de ${pages} · ${total.toLocaleString()} contatos`;
+    document.getElementById('btnPrev').disabled = page <= 1;
+    document.getElementById('btnNext').disabled = page >= pages;
+}
+
+function changePage(d) { _page = Math.max(1, _page + d); loadContacts(_selected, true); }
+
+function onSearch() { _q = document.getElementById('searchBox').value.trim(); _page = 1; loadContacts(_selected, true); }
+
+async function addPhone() {
+    const input = document.getElementById('addInput');
+    const msgEl = document.getElementById('addMsg');
+    const phone = input.value.trim();
+    if (!phone) return;
+    const res  = await fetch(`/api/list-mgmt/${encodeURIComponent(_selected)}/contacts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+        msgEl.style.color = '#2e7d32'; msgEl.textContent = '✓ ' + data.message;
+        input.value = '';
+        loadContacts(_selected, true); loadLists();
+    } else {
+        msgEl.style.color = '#c62828'; msgEl.textContent = '✗ ' + data.error;
+    }
+    setTimeout(() => msgEl.textContent = '', 3000);
+}
+
+async function removePhone(phone) {
+    if (!confirm(`Remover ${phone}?`)) return;
+    const res = await fetch(
+        `/api/list-mgmt/${encodeURIComponent(_selected)}/contacts/${encodeURIComponent(phone)}`,
+        { method: 'DELETE' }
+    );
+    if (res.ok) { loadContacts(_selected, true); loadLists(); }
+}
+
+// ── Toggle / Delete ──────────────────────────────────────────────────────────
+
+async function toggleActive(filename, active) {
+    await fetch(`/api/list-mgmt/${encodeURIComponent(filename)}/active`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active }),
+    });
+    const l = _lists.find(x => x.name === filename);
+    if (l) l.active = active;
+}
+
+async function deleteList(filename) {
+    if (!confirm(`Excluir "${filename}"?\nNão pode ser desfeito.`)) return;
+    const res = await fetch(`/api/list-mgmt/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+    if (res.ok) {
+        _clearContactsPanel(filename);
+        loadLists();
+    }
+}
+
+async function deleteSelected() {
+    const checked = getChecked();
+    if (!checked.length) return alert('Marque pelo menos uma lista.');
+    if (!confirm(`Excluir ${checked.length} lista(s) selecionada(s)?\nNão pode ser desfeito.`)) return;
+    await Promise.all(checked.map(f =>
+        fetch(`/api/list-mgmt/${encodeURIComponent(f)}`, { method: 'DELETE' })
+    ));
+    checked.forEach(f => _clearContactsPanel(f));
+    loadLists();
+}
+
+function _clearContactsPanel(filename) {
+    if (_selected !== filename) return;
+    _selected = null;
+    document.getElementById('contactsTitle').textContent = 'Clique em uma lista para ver os contatos';
+    document.getElementById('tableWrap').innerHTML = '<div class="empty-state">Selecione uma lista acima para visualizar e editar seus contatos.</div>';
+    document.getElementById('searchBox').style.display = 'none';
+    document.getElementById('addRow').style.display = 'none';
+    document.getElementById('pagination').style.display = 'none';
+}
+
+// ── Upload / New ─────────────────────────────────────────────────────────────
+
+async function uploadFiles(input) {
+    if (!input.files.length) return;
+    const fd = new FormData();
+    for (const f of input.files) fd.append('files', f);
+    const res  = await fetch('/api/listas/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    input.value = '';
+    showUploadMsg(data.message || data.error, !res.ok);
+    loadLists();
+}
+
+function showNewForm() { document.getElementById('newListForm').style.display = 'flex'; document.getElementById('newListName').focus(); }
+function hideNewForm() { document.getElementById('newListForm').style.display = 'none'; document.getElementById('newListName').value = ''; }
+
+async function createList() {
+    const name = document.getElementById('newListName').value.trim().replace(/\.xlsx$/i, '');
+    if (!name) return;
+    const res = await fetch('/api/list-mgmt/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: name }),
+    });
+    if (res.ok) {
+        hideNewForm(); showUploadMsg(`"${name}.xlsx" criada.`, false); loadLists();
+    } else {
+        const d = await res.json();
+        showUploadMsg(d.error || 'Erro ao criar.', true);
+    }
+}
+
+// ── Merge / Split ────────────────────────────────────────────────────────────
+
+async function doMerge() {
+    const checked = getChecked();
+    const msgEl   = document.getElementById('mergeMsg');
+    if (checked.length < 2) { showMsg(msgEl, 'Marque pelo menos 2 listas.', true); return; }
+    const outputName = document.getElementById('mergeOutput').value.trim() || 'Mesclagem';
+    showMsg(msgEl, '⏳ Mesclando...', false);
+    const res  = await fetch('/api/list-mgmt/merge', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filenames: checked, outputName }),
+    });
+    const data = await res.json();
+    showMsg(msgEl, res.ok ? `✅ ${data.message}` : `❌ ${data.error}`, !res.ok);
+    if (res.ok) loadLists();
+}
+
+async function doSplit() {
+    const checked = getChecked();
+    const msgEl   = document.getElementById('splitMsg');
+    if (checked.length !== 1) { showMsg(msgEl, 'Marque exatamente 1 lista.', true); return; }
+    const n = parseInt(document.getElementById('splitN').value, 10);
+    if (!n || n < 2) { showMsg(msgEl, 'N deve ser ≥ 2.', true); return; }
+    showMsg(msgEl, '⏳ Dividindo...', false);
+    const res  = await fetch('/api/list-mgmt/split', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: checked[0], n }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+        const names = data.parts.map(p => `${p.filename} (${p.count.toLocaleString()})`).join(' · ');
+        showMsg(msgEl, `✅ ${data.message} → ${names}`, false);
+        loadLists();
+    } else {
+        showMsg(msgEl, `❌ ${data.error}`, true);
+    }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function getChecked() { return Array.from(document.querySelectorAll('.list-cb:checked')).map(cb => cb.value); }
+function selectAll(v) { document.querySelectorAll('.list-cb').forEach(cb => cb.checked = v); }
+
+function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function fmtSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+function showMsg(el, text, isErr) {
+    el.textContent = text; el.className = `msg ${isErr ? 'err' : 'ok'}`; el.style.display = '';
+}
+function showUploadMsg(text, isErr) {
+    const el = document.getElementById('uploadMsg');
+    showMsg(el, text, isErr);
+    setTimeout(() => el.style.display = 'none', 4000);
+}
+
+loadLists();
+</script>
+</body>
+</html>

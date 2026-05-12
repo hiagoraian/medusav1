@@ -5,80 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestão de Zaps - Medusa</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #e5ddd5; margin: 0; padding: 20px; color: #303030; }
-
-.container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+        body { font-family: 'Segoe UI', sans-serif; background: #e5ddd5; margin: 0; padding: 20px; color: #303030; }
+        .container { max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,.1); }
         h1 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 0; }
-        .btn { background-color: #25D366; color: white; border: none; padding: 10px 20px; font-size: 14px; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s; }
-        .btn:hover { background-color: #128C7E; }
-        .btn:disabled { background-color: #ccc; cursor: not-allowed; }
-        .btn-secondary { background-color: #34b7f1; }
-        .btn-danger { background-color: #d32f2f; }
-        .btn-reconnect-all { background-color: #075e54; }
-        .btn-reconnect-all:hover { background-color: #054c44; }
-        .zap-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }
-        .zap-card { background: #f9f9f9; border: 1px solid #ddd; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .zap-card h3 { margin: 0 0 10px; color: #075e54; }
-        .status-badge { display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 12px; font-weight: bold; margin: 10px 0; }
-        .status-online     { background-color: #dcf8c6; color: #075e54; }
-        .status-offline    { background-color: #ffebee; color: #d32f2f; }
-        .status-connecting { background-color: #fff9c4; color: #f57f17; }
-        .btn-group { display: flex; gap: 10px; margin-top: 10px; }
-        .btn-group .btn { flex: 1; padding: 8px; font-size: 12px; }
-        .section { margin-bottom: 30px; padding: 20px; background: #f9f9f9; border-radius: 8px; border: 1px solid #ddd; }
-        .info-box { background-color: #dcf8c6; padding: 15px; border-radius: 5px; margin-top: 15px; border-left: 5px solid #25D366; }
         .nav { display: flex; gap: 10px; margin-bottom: 20px; }
         .nav a { padding: 10px 20px; background: #f0f0f0; border-radius: 5px; text-decoration: none; color: #075e54; font-weight: bold; }
         .nav a:hover { background: #e0e0e0; }
-        .reconnect-bar { margin-top: 15px; display: none; }
-        .reconnect-bar .progress-track { background: #e0e0e0; border-radius: 20px; height: 10px; overflow: hidden; margin: 8px 0; }
-        .reconnect-bar .progress-fill  { height: 100%; width: 0%; background: #25D366; border-radius: 20px; transition: width 0.4s ease; }
-        .reconnect-bar .progress-label { font-size: 13px; color: #555; }
-        .group-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 6px; background: #fff; cursor: pointer; font-size: 13px; }
-        .group-item:hover { border-color: #25D366; background: #f0fff5; }
-        .group-item input[type=radio] { flex-shrink: 0; }
-        .group-item.selected { border-color: #25D366; background: #dcf8c6; }
 
-        /* Modal QR Code */
-        .qr-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .btn { background: #25D366; color: #fff; border: none; padding: 10px 20px; font-size: 14px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: .2s; }
+        .btn:hover { background: #128C7E; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-danger { background: #d32f2f; } .btn-danger:hover { background: #b71c1c; }
+        .btn-secondary { background: #34b7f1; } .btn-secondary:hover { background: #0097d6; }
+        .btn-sm { padding: 6px 10px; font-size: 12px; }
+
+        .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+        #statusMsg { font-size: 13px; color: #555; min-height: 20px; margin-bottom: 16px; }
+
+        .zap-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 12px; }
+        .zap-card { background: #f9f9f9; border: 1px solid #ddd; padding: 16px; border-radius: 8px; text-align: center; }
+        .zap-card h3 { margin: 0 0 6px; color: #075e54; font-size: 15px; }
+        .zap-card.admin-card { border: 2px solid #7b1fa2; background: linear-gradient(135deg, #f3e5f5, #fff 60%); }
+        .zap-card.admin-card h3 { color: #4a148c; font-size: 13px; }
+
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: bold; margin: 6px 0 10px; }
+        .badge-online     { background: #dcf8c6; color: #075e54; }
+        .badge-connecting { background: #fff9c4; color: #f57f17; }
+        .badge-offline    { background: #ffebee; color: #d32f2f; }
+        .badge-admin      { background: #e1bee7; color: #4a148c; border: 1px solid #7b1fa2; }
+
+        .btn-group { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+
+        /* Modal QR */
+        .qr-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 1000; align-items: center; justify-content: center; }
         .qr-modal.active { display: flex; }
-        .qr-box { background: #fff; padding: 30px; border-radius: 16px; text-align: center; max-width: 360px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-        .qr-box h2 { color: #075e54; margin-top: 0; }
-        .qr-box img { width: 260px; height: 260px; border: 4px solid #25D366; border-radius: 8px; margin: 15px 0; }
-        .qr-box .qr-hint { font-size: 13px; color: #666; margin-bottom: 15px; }
-        .qr-box .qr-status { font-size: 14px; font-weight: bold; color: #555; margin-bottom: 15px; }
-        .qr-spinner { border: 4px solid #f0f0f0; border-top: 4px solid #25D366; border-radius: 50%; width: 48px; height: 48px; animation: spin 0.8s linear infinite; margin: 20px auto; }
+        .qr-box { background: #fff; padding: 28px; border-radius: 16px; text-align: center; max-width: 340px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,.3); }
+        .qr-box h2 { color: #075e54; margin: 0 0 8px; font-size: 18px; }
+        .qr-box img { width: 250px; height: 250px; border: 4px solid #25D366; border-radius: 8px; margin: 12px auto; display: block; }
+        .qr-hint { font-size: 12px; color: #666; margin: 0 0 12px; }
+        .qr-status { font-size: 13px; font-weight: bold; color: #555; }
+        .qr-spinner { border: 4px solid #f0f0f0; border-top-color: #25D366; border-radius: 50%; width: 48px; height: 48px; animation: spin .8s linear infinite; margin: 20px auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <!-- Modal Pairing Code -->
-    <div class="qr-modal" id="pairingModal">
-        <div class="qr-box">
-            <h2 id="pairingTitle">🔢 Conectar por Código</h2>
-            <div id="pairingContent">
-                <p style="margin-bottom:12px;color:#555;font-size:14px;">
-                    Digite o número do chip que será conectado (com DDI):
-                </p>
-                <input id="pairingPhone" type="tel" placeholder="5538999999999"
-                    style="width:100%;padding:10px;font-size:16px;border:1px solid #ccc;border-radius:6px;box-sizing:border-box;margin-bottom:12px;">
-                <button class="btn" id="btnGetCode" onclick="requestPairingCode()" style="width:100%;">
-                    Gerar Código
-                </button>
-                <div id="pairingCodeDisplay" style="display:none;margin-top:16px;text-align:center;">
-                    <p style="color:#555;font-size:13px;margin-bottom:6px;">
-                        WhatsApp → Dispositivos Conectados → Conectar com número de telefone
-                    </p>
-                    <div id="pairingCodeValue"
-                        style="font-size:36px;font-weight:bold;letter-spacing:6px;color:#075e54;padding:12px;background:#f0fff5;border-radius:8px;font-family:monospace;">
-                    </div>
-                    <p id="pairingCountdown" style="color:#e67e00;font-size:13px;font-weight:bold;margin-top:6px;"></p>
-                    <p id="pairingConnStatus" style="font-size:13px;margin-top:4px;"></p>
-                </div>
-            </div>
-            <button class="btn btn-danger" onclick="closePairingModal()" style="margin-top:14px;">✖ Fechar</button>
-        </div>
-    </div>
 
     <!-- Modal QR Code -->
     <div class="qr-modal" id="qrModal">
@@ -88,8 +58,8 @@
                 <div class="qr-spinner"></div>
                 <p class="qr-status">Gerando QR Code...</p>
             </div>
-            <p class="qr-hint" id="qrHint">Abra o WhatsApp no celular → Dispositivos Conectados → Conectar dispositivo</p>
-            <button class="btn btn-danger" onclick="closeQRModal()">✖ Fechar</button>
+            <p class="qr-hint">WhatsApp → Dispositivos Vinculados → Vincular dispositivo</p>
+            <button class="btn btn-danger btn-sm" onclick="closeQRModal()" style="margin-top:8px;">✖ Fechar</button>
         </div>
     </div>
 
@@ -101,398 +71,189 @@
             <a href="aquecimento.html">🔥 Aquecimento</a>
         </div>
 
-        <div class="section">
-            <h2>Status dos Zaps</h2>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <button class="btn btn-secondary" onclick="refreshStatus()">🔄 Atualizar Status</button>
-                <button id="btnReconnectAll" class="btn btn-reconnect-all" onclick="reconnectAll()">⚡ Reconectar Todos</button>
-            </div>
-
-            <div class="reconnect-bar" id="reconnectBar">
-                <div class="progress-track"><div class="progress-fill" id="reconnectFill"></div></div>
-                <div class="progress-label" id="reconnectLabel">Aguardando...</div>
-            </div>
-
-            <div class="zap-list" id="zapsList"></div>
+        <div class="actions">
+            <button class="btn" onclick="reconnectAll()">⚡ Reconectar Todos</button>
+            <button class="btn btn-danger" onclick="resetAll()">🗑️ Limpar Todas as Sessões</button>
         </div>
+        <div id="statusMsg"></div>
 
-        <div class="section">
-            <h2>Manutenção</h2>
-            <div class="btn-group">
-                <button class="btn btn-secondary" onclick="checkDevices()">📱 Status ADB</button>
-                <button class="btn btn-secondary" onclick="setupWebhooks()">🔗 Reconfigurar Webhooks</button>
-            </div>
-            <div id="maintenanceResult" class="info-box" style="display: none; margin-top: 15px;"></div>
-        </div>
-
+        <div class="zap-list" id="zapsList"></div>
     </div>
 
-
 <script>
-        let qrPollInterval = null;
-        let currentQrAccount = null;
+    let qrPollInterval  = null;
+    let qrRefreshTimer  = null;
+    let currentQrAccount = null;
 
-        // ── QR Modal ──────────────────────────────────────────
-        function openQRModal(accountId) {
-            currentQrAccount = accountId;
-            document.getElementById('qrTitle').textContent = `📱 ${accountId} — Escaneie o QR Code`;
-            document.getElementById('qrHint').textContent = 'Abra o WhatsApp → Dispositivos Conectados → Conectar dispositivo';
-            document.getElementById('qrContent').innerHTML = `<div class="qr-spinner"></div><p class="qr-status">Gerando QR Code...</p>`;
-            document.getElementById('qrModal').classList.add('active');
-            startQRPolling(accountId);
+    // ── QR Modal ──────────────────────────────────────────────────────────────
+    function openQRModal(accountId, initialQr) {
+        currentQrAccount = accountId;
+        document.getElementById('qrTitle').textContent = `📱 ${accountId}`;
+        const content = document.getElementById('qrContent');
+        if (initialQr) {
+            content.innerHTML = `<img src="${initialQr}" alt="QR Code"><p class="qr-status">Aguardando leitura...</p>`;
+        } else {
+            content.innerHTML = `<div class="qr-spinner"></div><p class="qr-status">Gerando QR Code...</p>`;
         }
+        document.getElementById('qrModal').classList.add('active');
+        startQRPolling(accountId, !initialQr);
+    }
 
-        function closeQRModal() {
-            clearInterval(qrPollInterval);
-            qrPollInterval = null;
-            currentQrAccount = null;
-            document.getElementById('qrModal').classList.remove('active');
-        }
+    function closeQRModal() {
+        clearInterval(qrPollInterval);
+        clearInterval(qrRefreshTimer);
+        qrPollInterval = qrRefreshTimer = null;
+        currentQrAccount = null;
+        document.getElementById('qrModal').classList.remove('active');
+    }
 
-        function startQRPolling(accountId) {
-            clearInterval(qrPollInterval);
-            pollQR(accountId); // imediato
-            qrPollInterval = setInterval(() => pollQR(accountId), 4000);
-        }
+    function startQRPolling(accountId, fetchNow) {
+        clearInterval(qrPollInterval);
+        clearInterval(qrRefreshTimer);
+        // Estado a cada 3s (endpoint leve, não regenera QR)
+        qrPollInterval = setInterval(() => pollState(accountId), 3000);
+        // Rebusca QR a cada 55s (antes do WA expirar o QR em 60s)
+        qrRefreshTimer = setInterval(() => fetchQRCode(accountId), 55000);
+        if (fetchNow) fetchQRCode(accountId);
+    }
 
-        async function pollQR(accountId) {
-            try {
-                const res  = await fetch(`/api/whatsapp/qrcode/${accountId}`);
-                const data = await res.json();
-
-                if (data.state === 'open') {
-                    // Conectado — fecha o modal e atualiza cards
-                    clearInterval(qrPollInterval);
-                    document.getElementById('qrContent').innerHTML = `<p style="font-size:48px">✅</p><p class="qr-status" style="color:#075e54;">Conectado com sucesso!</p>`;
-                    setTimeout(() => { closeQRModal(); refreshStatus(); }, 2000);
-                    return;
-                }
-
-                if (data.qrcode) {
-                    document.getElementById('qrContent').innerHTML = `
-                        <img src="${data.qrcode}" alt="QR Code" />
-                        <p class="qr-status">Aguardando leitura...</p>`;
-                } else {
-                    document.getElementById('qrContent').innerHTML = `<div class="qr-spinner"></div><p class="qr-status">Aguardando QR Code...</p>`;
-                }
-            } catch (_) {}
-        }
-
-        // ── Status dos Zaps ───────────────────────────────────
-        async function refreshStatus() {
-            try {
-                const res    = await fetch('/api/zaps-status');
-                const data   = await res.json();
-                renderZapCards(data);
-            } catch (err) {
-                console.error('Erro ao atualizar status:', err);
+    async function pollState(accountId) {
+        try {
+            const { state } = await fetch(`/api/whatsapp/state/${accountId}`).then(r => r.json());
+            if (state === 'open') {
+                clearInterval(qrPollInterval);
+                clearInterval(qrRefreshTimer);
+                document.getElementById('qrContent').innerHTML =
+                    `<p style="font-size:48px">✅</p><p class="qr-status" style="color:#075e54">Conectado com sucesso!</p>`;
+                setTimeout(() => { closeQRModal(); refreshStatus(); }, 2000);
             }
-        }
+        } catch (_) {}
+    }
 
-        function renderZapCards(data) {
-            const container = document.getElementById('zapsList');
-            container.innerHTML = '';
-            data.forEach(zap => {
-                const card = document.createElement('div');
-                card.className = 'zap-card';
+    async function fetchQRCode(accountId) {
+        try {
+            const data = await fetch(`/api/whatsapp/qrcode/${accountId}`).then(r => r.json());
+            if (data.state === 'open') return;
+            const content = document.getElementById('qrContent');
+            if (data.qrcode) {
+                content.innerHTML = `<img src="${data.qrcode}" alt="QR Code"><p class="qr-status">Aguardando leitura...</p>`;
+            } else {
+                content.innerHTML = `<div class="qr-spinner"></div><p class="qr-status">Aguardando QR Code...</p>`;
+            }
+        } catch (_) {}
+    }
 
-                let statusClass, statusText;
-                if (zap.state === 'open') {
-                    statusClass = 'status-online';     statusText = '✅ Ativo';
-                } else if (zap.state === 'connecting') {
-                    statusClass = 'status-connecting'; statusText = '⏳ Conectando';
-                } else if (zap.hasInstance) {
-                    statusClass = 'status-offline';    statusText = '❌ Inativo (cache)';
-                } else {
-                    statusClass = 'status-offline';    statusText = '⬜ Sem sessão';
-                }
+    // ── Status ────────────────────────────────────────────────────────────────
+    async function refreshStatus() {
+        try {
+            const data = await fetch('/api/zaps-status').then(r => r.json());
+            renderZapCards(data);
+        } catch (_) {}
+    }
 
-                let buttons;
-                if (zap.state === 'open') {
-                    buttons = `
-                        <button class="btn btn-danger" onclick="disconnectZap('${zap.accountId}')">🔴 Desconectar</button>
-                        <button class="btn btn-danger" onclick="deleteZap('${zap.accountId}')" title="Apagar sessão/cache">🗑️</button>`;
-                } else {
-                    const connectLabel = zap.hasInstance ? '🔄 Reconectar' : '📷 Conectar QR';
-                    buttons = `
-                        <button class="btn btn-secondary" onclick="connectZap('${zap.accountId}', '${zap.state}', ${zap.hasInstance})">${connectLabel}</button>
-                        <button class="btn btn-secondary" onclick="connectPairing('${zap.accountId}')" title="Conectar por código">🔢</button>
-                        <button class="btn btn-danger" onclick="deleteZap('${zap.accountId}')" title="Apagar sessão/cache" ${!zap.hasInstance ? 'disabled' : ''}>🗑️</button>`;
-                }
+    function renderZapCards(data) {
+        const container = document.getElementById('zapsList');
+        container.innerHTML = '';
+        data.forEach(zap => {
+            const card = document.createElement('div');
 
+            if (zap.isAdmin) {
+                card.className = 'zap-card admin-card';
+                const isOpen = zap.state === 'open';
+                const badge   = isOpen ? '👑 Online' : '❌ Offline';
+                const badgeCls = isOpen ? 'badge-admin' : 'badge-offline';
+                const btn = isOpen
+                    ? `<button class="btn btn-danger btn-sm" onclick="deleteZap('${zap.accountId}')">🗑️</button>`
+                    : `<button class="btn btn-secondary btn-sm" onclick="connectZap('${zap.accountId}')">📷 Conectar</button>`;
                 card.innerHTML = `
-                    <h3>${zap.accountId}</h3>
-                    <div class="status-badge ${statusClass}">${statusText}</div>
-                    <div class="btn-group">${buttons}</div>`;
+                    <h3>👑 Admin<br><span style="font-size:11px;color:#888">${zap.accountId}</span></h3>
+                    <span class="badge ${badgeCls}">${badge}</span>
+                    <div class="btn-group">${btn}</div>`;
                 container.appendChild(card);
-            });
-        }
-
-        // ── Conectar Zap ──────────────────────────────────────
-        async function connectZap(accountId, currentState, hasInstance) {
-            if (currentState === 'open') return;
-
-            try {
-                const res  = await fetch('/api/whatsapp/start', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ accountId }),
-                });
-                const data = await res.json();
-
-                if (data.connected) {
-                    refreshStatus();
-                    return;
-                }
-
-                if (data.error) {
-                    alert(`Erro: ${data.error}`);
-                    return;
-                }
-
-                // Abre o modal sempre — o polling interno busca o QR quando ficar pronto
-                openQRModal(accountId);
-            } catch (_) {
-                alert('Erro ao conectar.');
-            }
-        }
-
-        // ── Deletar Zap ───────────────────────────────────────
-        // ── Pairing Code ──────────────────────────────────────
-        let _pairingAccount = null;
-
-        function connectPairing(accountId) {
-            _pairingAccount = accountId;
-            document.getElementById('pairingTitle').textContent = `🔢 ${accountId} — Conectar por Código`;
-            document.getElementById('pairingPhone').value = '';
-            document.getElementById('pairingCodeDisplay').style.display = 'none';
-            document.getElementById('btnGetCode').disabled = false;
-            document.getElementById('btnGetCode').textContent = 'Gerar Código';
-            document.getElementById('pairingModal').classList.add('active');
-            setTimeout(() => document.getElementById('pairingPhone').focus(), 100);
-        }
-
-        let _pairingPollInterval    = null;
-        let _pairingCountdownTimer = null;
-
-        function stopPairingPoll() {
-            if (_pairingPollInterval)    { clearInterval(_pairingPollInterval);    _pairingPollInterval    = null; }
-            if (_pairingCountdownTimer) { clearInterval(_pairingCountdownTimer); _pairingCountdownTimer = null; }
-        }
-
-        function startCountdown(seconds) {
-            if (_pairingCountdownTimer) clearInterval(_pairingCountdownTimer);
-            const el = document.getElementById('pairingCountdown');
-            let remaining = seconds;
-            const tick = () => {
-                if (remaining <= 0) {
-                    el.textContent = '⏰ Código expirado — gere um novo código';
-                    el.style.color = '#d32f2f';
-                    clearInterval(_pairingCountdownTimer);
-                    return;
-                }
-                el.style.color  = remaining <= 15 ? '#d32f2f' : '#e67e00';
-                el.textContent  = `⚠️ Digite no WhatsApp agora — ${remaining}s restantes`;
-                remaining--;
-            };
-            tick();
-            _pairingCountdownTimer = setInterval(tick, 1000);
-        }
-
-        function startPairingPoll(accountId) {
-            stopPairingPoll();
-            const statusEl = document.getElementById('pairingConnStatus');
-            _pairingPollInterval = setInterval(async () => {
-                try {
-                    const r = await fetch(`/api/whatsapp/qrcode/${accountId}`);
-                    const d = await r.json();
-                    if (d.state === 'open') {
-                        stopPairingPoll();
-                        statusEl.innerHTML = '<span style="color:#075e54;font-weight:bold;">✅ Conectado com sucesso!</span>';
-                        setTimeout(() => { closePairingModal(); refreshStatus(); }, 1500);
-                    }
-                } catch (_) {}
-            }, 3000);
-        }
-
-        function closePairingModal() {
-            stopPairingPoll();
-            _pairingAccount = null;
-            document.getElementById('pairingModal').classList.remove('active');
-        }
-
-        async function requestPairingCode() {
-            const phone = document.getElementById('pairingPhone').value.replace(/\D/g, '');
-            if (phone.length < 10) return alert('Digite o número completo com DDI (ex: 5538999999999).');
-
-            const btn = document.getElementById('btnGetCode');
-            btn.disabled    = true;
-            btn.textContent = '⏳ Aguardando (até 30s)...';
-            stopPairingPoll();
-            document.getElementById('pairingCodeDisplay').style.display = 'none';
-
-            try {
-                const res  = await fetch(`/api/whatsapp/pairing-code/${_pairingAccount}`, {
-                    method:  'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body:    JSON.stringify({ phoneNumber: phone }),
-                });
-                const data = await res.json();
-
-                if (data.error) {
-                    alert(`Erro: ${data.error}`);
-                    btn.disabled    = false;
-                    btn.textContent = 'Gerar Código';
-                    return;
-                }
-
-                // Formata como XXXX-XXXX para facilitar digitação
-                const raw       = data.code || '';
-                const formatted = raw.length === 8 ? raw.slice(0, 4) + '-' + raw.slice(4) : raw;
-                document.getElementById('pairingCodeValue').textContent    = formatted;
-                document.getElementById('pairingConnStatus').textContent   = '⏳ Aguardando conexão...';
-                document.getElementById('pairingCodeDisplay').style.display = 'block';
-                btn.textContent = '🔄 Gerar Novo Código';
-                btn.disabled    = false;
-
-                // Countdown de 45s (código sem QR dura ~60s, com margem de segurança)
-                startCountdown(45);
-
-                // Monitora conexão automaticamente
-                startPairingPoll(_pairingAccount);
-                setTimeout(stopPairingPoll, 90_000);
-            } catch (_) {
-                alert('Erro de comunicação com o servidor.');
-                btn.disabled    = false;
-                btn.textContent = 'Gerar Código';
-            }
-        }
-
-        async function disconnectZap(accountId) {
-            if (!confirm(`Desconectar ${accountId}?\n\nO cache será mantido — ele pode reconectar via QR sem apagar a sessão.`)) return;
-            try {
-                const res  = await fetch(`/api/whatsapp/disconnect/${accountId}`, { method: 'POST' });
-                const data = await res.json();
-                alert(data.message || data.error);
-                refreshStatus();
-            } catch (_) {
-                alert('Erro ao desconectar.');
-            }
-        }
-
-        async function deleteZap(accountId) {
-            if (!confirm(`⚠️ Isso vai desconectar e apagar a sessão de ${accountId}.\n\nEle precisará escanear o QR Code novamente.\n\nConfirmar?`)) return;
-            try {
-                const res  = await fetch(`/api/whatsapp/${accountId}`, { method: 'DELETE' });
-                const data = await res.json();
-                alert(data.message || data.error);
-                refreshStatus();
-            } catch (_) {
-                alert('Erro ao remover o Zap.');
-            }
-        }
-
-        // ── Reconectar Todos ──────────────────────────────────
-        async function reconnectAll() {
-            const btn   = document.getElementById('btnReconnectAll');
-            const bar   = document.getElementById('reconnectBar');
-            const fill  = document.getElementById('reconnectFill');
-            const label = document.getElementById('reconnectLabel');
-
-            let allAccounts = [];
-            try {
-                const res  = await fetch('/api/zaps-status');
-                const data = await res.json();
-                // Só reconecta quem já tem instância/cache salvo na Evolution API
-                allAccounts = data.filter(z => z.hasInstance).map(z => z.accountId);
-                renderZapCards(data);
-            } catch (_) {
-                label.textContent = '❌ Erro ao verificar status.';
                 return;
             }
 
-            if (allAccounts.length === 0) {
-                bar.style.display = 'block';
-                label.textContent = '⚠️ Nenhum zap com sessão salva para reconectar.';
-                btn.disabled  = false;
-                btn.innerHTML = '⚡ Reconectar Todos';
-                return;
+            card.className = 'zap-card';
+            let badgeCls, badgeTxt;
+            if      (zap.state === 'open')       { badgeCls = 'badge-online';     badgeTxt = '✅ Ativo'; }
+            else if (zap.state === 'connecting') { badgeCls = 'badge-connecting'; badgeTxt = '⏳ Conectando'; }
+            else if (zap.hasInstance)            { badgeCls = 'badge-offline';    badgeTxt = '❌ Desconectado'; }
+            else                                 { badgeCls = 'badge-offline';    badgeTxt = '⬜ Sem sessão'; }
+
+            let buttons;
+            if (zap.state === 'open') {
+                buttons = `<button class="btn btn-danger btn-sm" onclick="deleteZap('${zap.accountId}')">🗑️ Excluir</button>`;
+            } else {
+                const lbl = zap.hasInstance ? '🔄 Reconectar' : '📷 QR Code';
+                buttons = `
+                    <button class="btn btn-secondary btn-sm" onclick="connectZap('${zap.accountId}')">${lbl}</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteZap('${zap.accountId}')" ${!zap.hasInstance ? 'disabled' : ''}>🗑️</button>`;
             }
 
-            const total = allAccounts.length;
-            btn.disabled  = true;
-            btn.innerHTML = '⏳ Reconectando...';
-            bar.style.display = 'block';
-            fill.style.width  = '0%';
-            label.textContent = `Reconectando ${total} zap(s) com cache... 0 / ${total} online`;
+            card.innerHTML = `
+                <h3>${zap.accountId}</h3>
+                <span class="badge ${badgeCls}">${badgeTxt}</span>
+                <div class="btn-group">${buttons}</div>`;
+            container.appendChild(card);
+        });
+    }
 
+    // ── Ações por zap ─────────────────────────────────────────────────────────
+    async function connectZap(accountId) {
+        try {
+            const data = await fetch('/api/whatsapp/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ accountId }),
+            }).then(r => r.json());
+
+            if (data.connected) { refreshStatus(); return; }
+            if (data.error)     { alert(`Erro: ${data.error}`); return; }
+            openQRModal(accountId, data.qrcode || null);
+        } catch (_) { alert('Erro ao conectar.'); }
+    }
+
+    async function deleteZap(accountId) {
+        if (!confirm(`Apagar sessão de ${accountId}?\nPrecisará escanear o QR Code novamente.`)) return;
+        try {
+            await fetch(`/api/whatsapp/${accountId}`, { method: 'DELETE' });
+            refreshStatus();
+        } catch (_) {}
+    }
+
+    // ── Ações globais ─────────────────────────────────────────────────────────
+    async function reconnectAll() {
+        const msg = document.getElementById('statusMsg');
+        msg.textContent = '⏳ Verificando zaps com sessão...';
+        try {
+            const all         = await fetch('/api/zaps-status').then(r => r.json());
+            const toReconnect = all.filter(z => z.hasInstance && z.state !== 'open').map(z => z.accountId);
+            if (!toReconnect.length) { msg.textContent = '✅ Todos os zaps já estão ativos.'; return; }
+            msg.textContent = `⏳ Reconectando ${toReconnect.length} zap(s)...`;
             await fetch('/api/whatsapp/start-bulk', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ accounts: allAccounts }),
+                body: JSON.stringify({ accounts: toReconnect }),
             });
+            msg.textContent = `⏳ ${toReconnect.length} zap(s) reconectando — aguarde...`;
+            setTimeout(refreshStatus, 15000);
+        } catch (_) { msg.textContent = '❌ Erro ao reconectar.'; }
+    }
 
-            let pollCount = 0;
-            const poll = setInterval(async () => {
-                pollCount++;
-                try {
-                    const res  = await fetch('/api/zaps-status');
-                    const data = await res.json();
-                    const connected = data.filter(z => z.state === 'open').length;
-                    const pct = Math.round((connected / total) * 100);
-                    fill.style.width  = pct + '%';
-                    label.textContent = `${connected} / ${total} conectados (${pct}%)`;
-                    renderZapCards(data);
+    async function resetAll() {
+        if (!confirm('⚠️ ATENÇÃO\n\nIsso vai apagar as sessões de TODOS os 48 zaps.\nVocê precisará escanear o QR Code de cada um novamente.\n\nConfirmar?')) return;
+        const msg = document.getElementById('statusMsg');
+        msg.textContent = '⏳ Limpando todas as sessões...';
+        try {
+            const data = await fetch('/api/whatsapp/reset-all', { method: 'POST' }).then(r => r.json());
+            msg.textContent = data.message || data.error;
+            setTimeout(refreshStatus, 8000);
+        } catch (_) { msg.textContent = '❌ Erro ao limpar sessões.'; }
+    }
 
-                    if (connected >= total || pollCount >= 60) {
-                        clearInterval(poll);
-                        label.textContent = connected >= total
-                            ? `✅ Todos os ${total} Zaps conectados!`
-                            : `⚠️ ${connected} / ${total} conectados.`;
-                        btn.disabled = false;
-                        btn.innerHTML = '⚡ Reconectar Todos';
-                    }
-                } catch (_) {}
-            }, 6000);
-        }
-
-        // ── Manutenção ────────────────────────────────────────
-        async function checkDevices() {
-            try {
-                const res  = await fetch('/api/devices-status');
-                const data = await res.json();
-                const box  = document.getElementById('maintenanceResult');
-                box.style.display = 'block';
-                if (data.available) {
-                    box.innerHTML = '<strong>Dispositivos ADB:</strong><br>' +
-                        data.devices.map(d => `${d.connected ? '✅' : '❌'} ${d.description} (porta ${d.port})`).join('<br>');
-                } else {
-                    box.textContent = '⚠️ ADB não disponível.';
-                }
-            } catch (_) {
-                document.getElementById('maintenanceResult').textContent = 'Erro ao verificar dispositivos.';
-            }
-        }
-
-        // ── Webhooks ──────────────────────────────────────────
-        async function setupWebhooks() {
-            const btn = event.target;
-            btn.disabled = true; btn.textContent = '⏳...';
-            try {
-                const res  = await fetch('/api/setup-webhooks', { method: 'POST' });
-                const data = await res.json();
-                const box  = document.getElementById('maintenanceResult');
-                box.style.display = 'block';
-                box.textContent   = data.message || data.error;
-            } catch (_) {} finally {
-                btn.disabled = false; btn.textContent = '🔗 Reconfigurar Webhooks';
-            }
-        }
-
-        // ── Init ──────────────────────────────────────────────
-        refreshStatus();
-        setInterval(refreshStatus, 10000);
-
-    </script>
+    // ── Init ──────────────────────────────────────────────────────────────────
+    refreshStatus();
+    setInterval(refreshStatus, 15000);
+</script>
 </body>
 </html>

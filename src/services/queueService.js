@@ -44,6 +44,16 @@ export const countPending = async () => {
     return parseInt(rows[0].total, 10);
 };
 
+export const countCycleStats = async (cycleId) => {
+    const { rows } = await query(
+        `SELECT status, COUNT(*) AS cnt FROM messages_queue WHERE cycle_id = $1 GROUP BY status`,
+        [cycleId]
+    );
+    const stats = { enviado: 0, falha: 0, invalido: 0, pendente: 0 };
+    rows.forEach(r => { stats[r.status] = parseInt(r.cnt, 10); });
+    return stats;
+};
+
 export const countPendingInCycle = async (cycleId) => {
     const { rows } = await query(
         `SELECT COUNT(*) AS total FROM messages_queue WHERE cycle_id = $1 AND status = 'pendente'`,

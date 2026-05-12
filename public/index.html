@@ -41,9 +41,12 @@
         .nav a:hover { background: #e0e0e0; }
         .btn-group { display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap; }
         .btn-group .btn { flex: 1; }
-        .zap-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; }
-        .zap-dot.online  { background: #25D366; }
-        .zap-dot.offline { background: #d32f2f; }
+        .zap-status-badge { font-size: 10px; padding: 2px 5px; border-radius: 8px; font-weight: bold; white-space: nowrap; }
+        .zap-s-on   { background: #dcf8c6; color: #075e54; }
+        .zap-s-zomb { background: #fff3e0; color: #bf360c; border: 1px solid #ff6d00; }
+        .zap-s-off  { background: #ffebee; color: #d32f2f; }
+        .zap-s-conn { background: #fff9c4; color: #f57f17; }
+        .zap-s-none { background: #f5f5f5; color: #999; }
         small.hint { display: block; color: #888; font-size: 12px; margin-top: 4px; }
         .level-info { background: #e8f5e9; border-radius: 6px; padding: 10px 14px; margin-top: 10px; font-size: 13px; color: #2e7d32; line-height: 1.6; }
         /* Listas */
@@ -111,6 +114,7 @@
     <div class="nav">
         <a href="zaps.html">🔌 Gestão de Zaps</a>
         <a href="aquecimento.html">🔥 Aquecimento</a>
+        <a href="listas.html">📋 Gestão de Listas</a>
     </div>
 
     <!-- Dashboard -->
@@ -141,7 +145,7 @@
 
     <!-- 1. Listas -->
     <div class="section">
-        <h2>1. Gerenciador de Listas</h2>
+        <h2>1. Gerenciador de Listas <a href="/listas.html" style="font-size:12px;font-weight:normal;color:#3949ab;margin-left:10px;">📋 Gestão de Listas →</a></h2>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <label class="btn btn-secondary" style="cursor:pointer;width:auto;padding:10px 20px;font-size:14px;">
                 📁 Adicionar Arquivos (.xlsx)
@@ -290,7 +294,7 @@
             <label>
                 <input type="checkbox" class="zap-cb" value="${id}" data-group="${group}" onchange="updateZapSummary()">
                 <span>${id}</span>
-                <span class="zap-dot offline" id="dot-${id}"></span>
+                <span class="zap-status-badge zap-s-none" id="badge-${id}">—</span>
                 <span class="group-tag group-${group.toLowerCase()}">${group}</span>
             </label>`;
         testSelect.innerHTML += `<option value="${id}">${id}</option>`;
@@ -312,9 +316,17 @@
 
     async function verifyZapsNow() {
         const btn = document.getElementById('btnVerifyZaps');
-        btn.textContent = '⏳ Verificando...';
+        btn.textContent = '⏳ Verificando (até 35s)...';
         btn.disabled    = true;
-        await refreshZapStatus();
+        try {
+            const data = await (await fetch('/api/zaps-deep-check', { signal: AbortSignal.timeout(45000) })).json();
+            data.forEach(zap => {
+                zapStatusMap[zap.accountId] = zap.deepState === 'confirmed';
+                updateZapBadge(zap.accountId, zap.deepState, zap.state);
+            });
+            updateZapSummary();
+            updatePreviewInfo();
+        } catch (_) {}
         btn.textContent = '🔄 Verificar Agora';
         btn.disabled    = false;
     }
@@ -335,12 +347,19 @@
         const files = await res.json();
         const el    = document.getElementById('listaFiles');
 
+        // mostra apenas listas habilitadas no painel
+        const active = files.filter(f => f.active !== false);
+
         if (!files.length) {
-            el.innerHTML = '<p style="color:#999;font-size:13px;margin:0;">Nenhuma lista carregada. Adicione arquivos .xlsx acima.</p>';
+            el.innerHTML = '<p style="color:#999;font-size:13px;margin:0;">Nenhuma lista carregada. <a href="/listas.html">Acesse Gestão de Listas</a> para fazer upload.</p>';
+            return;
+        }
+        if (!active.length) {
+            el.innerHTML = '<p style="color:#e65100;font-size:13px;margin:0;">Nenhuma lista habilitada para o painel. <a href="/listas.html">Abra Gestão de Listas</a> e ative as listas desejadas.</p>';
             return;
         }
 
-        el.innerHTML = files.map(f => `
+        el.innerHTML = active.map(f => `
             <div class="lista-item">
                 <input type="checkbox" class="lista-cb" value="${f.name}">
                 <span class="name">📄 ${f.name}</span>
@@ -475,13 +494,27 @@
     document.querySelectorAll('.zap-cb').forEach(cb => cb.addEventListener('change', updatePreviewInfo));
 
     // ── Zap status ────────────────────────────────────────────────────────────
+    function updateZapBadge(accountId, deepState, state) {
+        const badge = document.getElementById(`badge-${accountId}`);
+        if (!badge) return;
+        let text, cls;
+        if      (deepState === 'confirmed')                                   { text = '✅ Ativo';    cls = 'zap-s-on';   }
+        else if (deepState === 'needs_qr')                                    { text = '🟠 Expirado'; cls = 'zap-s-zomb'; }
+        else if (deepState === 'disconnected' || deepState === 'no_instance') { text = '❌ Off';      cls = 'zap-s-off';  }
+        else if (state === 'open')                                            { text = '✅ Ativo';    cls = 'zap-s-on';   }
+        else if (state === 'connecting')                                      { text = '⏳';          cls = 'zap-s-conn'; }
+        else                                                                  { text = '❌ Off';      cls = 'zap-s-off';  }
+        badge.textContent = text;
+        badge.className   = `zap-status-badge ${cls}`;
+    }
+
     async function refreshZapStatus() {
         try {
             const data = await (await fetch('/api/zaps-status')).json();
             data.forEach(zap => {
+                // deepState vem do servidor (zombie persistente) — sem cache no browser
                 zapStatusMap[zap.accountId] = zap.connected;
-                const dot = document.getElementById(`dot-${zap.accountId}`);
-                if (dot) dot.className = 'zap-dot ' + (zap.connected ? 'online' : 'offline');
+                updateZapBadge(zap.accountId, zap.deepState, zap.state);
             });
             updateZapSummary();
             updatePreviewInfo();

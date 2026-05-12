@@ -30,6 +30,17 @@ warmup_media/audios/*
 .wwebjs_auth/
 orquestrador.sqlite
 
+# Arquivos de estado em tempo de execução
+zombie_set.json
+replies_config.json
+pendentes_ciclo10.txt
+
+# APK (binário grande)
+scripts/*.apk
+
+# Números ignorados (específico de cada máquina)
+ignore_numbers.txt
+
 # Claude Code
 .claude/
 

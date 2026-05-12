@@ -163,10 +163,12 @@ export const startWorkers = async (activeAccounts, campaignConfig) => {
                         orphaned = true;
                         console.error(`🔴 [${accountId}] Declarado órfão. Drenando fila restante...`);
                         setImmediate(async () => {
-                            try { await ch.cancel(consumerRef.tag); } catch (_) {}
-                            await drainOrphanQueue(ch, queue, campaignConfig.cycleId, accountId, 'Instância offline — órfão');
-                            try { await ch.close(); } catch (_) {}
-                            delete consumerTags[accountId];
+                            try {
+                                try { await ch.cancel(consumerRef.tag); } catch (_) {}
+                                await drainOrphanQueue(ch, queue, campaignConfig.cycleId, accountId, 'Instância offline — órfão');
+                                try { await ch.close(); } catch (_) {}
+                                delete consumerTags[accountId];
+                            } catch (_) {}
                         });
                     }
                     return;
@@ -195,10 +197,12 @@ export const startWorkers = async (activeAccounts, campaignConfig) => {
                             console.error(`🔴 [${accountId}] ${ORPHAN_THRESHOLD} ghost sends consecutivos. Declarado órfão.`);
                             try { ch.ack(msg); } catch (_) {}
                             setImmediate(async () => {
-                                try { await ch.cancel(consumerRef.tag); } catch (_) {}
-                                await drainOrphanQueue(ch, queue, campaignConfig.cycleId, accountId, 'Ghost sends consecutivos — órfão');
-                                try { await ch.close(); } catch (_) {}
-                                delete consumerTags[accountId];
+                                try {
+                                    try { await ch.cancel(consumerRef.tag); } catch (_) {}
+                                    await drainOrphanQueue(ch, queue, campaignConfig.cycleId, accountId, 'Ghost sends consecutivos — órfão');
+                                    try { await ch.close(); } catch (_) {}
+                                    delete consumerTags[accountId];
+                                } catch (_) {}
                             });
                             return;
                         }
@@ -234,10 +238,12 @@ export const startWorkers = async (activeAccounts, campaignConfig) => {
                         console.error(`🔴 [${accountId}] ${ORPHAN_THRESHOLD} falhas consecutivas de envio. Declarado órfão.`);
                         try { ch.ack(msg); } catch (_) {}
                         setImmediate(async () => {
-                            try { await ch.cancel(consumerRef.tag); } catch (_) {}
-                            await drainOrphanQueue(ch, queue, campaignConfig.cycleId, accountId, 'Falhas consecutivas de envio — órfão');
-                            try { await ch.close(); } catch (_) {}
-                            delete consumerTags[accountId];
+                            try {
+                                try { await ch.cancel(consumerRef.tag); } catch (_) {}
+                                await drainOrphanQueue(ch, queue, campaignConfig.cycleId, accountId, 'Falhas consecutivas de envio — órfão');
+                                try { await ch.close(); } catch (_) {}
+                                delete consumerTags[accountId];
+                            } catch (_) {}
                         });
                         return;
                     }

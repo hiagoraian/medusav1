@@ -5,7 +5,11 @@ import path from 'path';
 import multer from 'multer';
 import fs from 'fs';
 import { exec } from 'child_process';
+import { promisify } from 'util';
 import { fileURLToPath } from 'url';
+import pg from 'pg';
+
+const execPromise = promisify(exec);
 
 import { initSchema, query }                        from './src/database/postgres.js';
 import { processExcelFiles }                       from './src/services/excelProcessor.js';
@@ -14,18 +18,189 @@ import {
     getDashboardStats, clearQueue, resetCampaign, getInterruptedCycle, updateCycleStats, clearDashboardData,
 } from './src/services/queueService.js';
 import { runCampaignLoop, requestStop }            from './src/services/orchestrator.js';
-import { startWarmup, stopWarmup, startScheduledWarmup, isWarmupRunning, getWarmupState } from './src/services/chipWarmup.js';
-import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount } from './src/services/networkController.js';
+import { startWarmup, stopWarmup, startScheduledWarmup, isWarmupRunning, getWarmupState, clearOwnerCacheFor } from './src/services/chipWarmup.js';
+import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount, getStaticProxyForAccount } from './src/services/networkController.js';
 import { generateCampaignReport }                  from './src/services/reportGenerator.js';
 import { notifyAck }                              from './src/services/ackWaiter.js';
 import * as evolution                              from './src/evolution/client.js';
+import {
+    getAllLists, readListPhones, writeListPhones,
+    addPhoneToList, removePhoneFromList,
+    mergeLists, splitIntoN,
+    setListActive, deleteList as deleteListFile, readActiveState,
+} from './src/services/listManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-// Pairing codes recebidos via webhook QRCODE_UPDATED
-// instanceName → code string (null enquanto aguarda)
-const pairingCodeStore = new Map();
+
+// ── Aggregador de respostas ───────────────────────────────────────────────────
+
+const IGNORE_FILE = path.join(__dirname, 'ignore_numbers.txt');
+
+const loadIgnoreNumbers = () => {
+    try {
+        if (!fs.existsSync(IGNORE_FILE)) return new Set();
+        return new Set(
+            fs.readFileSync(IGNORE_FILE, 'utf8')
+                .split('\n')
+                .map(l => l.trim().replace(/\D/g, ''))
+                .filter(l => l.length > 4 && !l.startsWith('#') && l !== '')
+        );
+    } catch (_) { return new Set(); }
+};
+
+// Instâncias atualmente abertas — atualizado pelo webhook CONNECTION_UPDATE
+// Usado para auto-selecionar o zap remetente quando REPLIES_INSTANCE não está definido
+const _connectedInstances = new Set();
+
+// Números dos próprios zaps — auto-preenchido no startup e atualizável
+let _ownNumbers      = new Set();
+const refreshOwnNumbers = async () => {
+    try {
+        const instances = await evolution.fetchInstances();
+        _ownNumbers = new Set(
+            instances
+                .map(i => String(i?.ownerJid || i?.instance?.owner || i?.owner || '').replace(/\D/g, ''))
+                .filter(n => n.length > 4)
+        );
+        if (_ownNumbers.size) console.log(`[REPLIES] ${_ownNumbers.size} número(s) próprio(s) carregado(s) para auto-ignore.`);
+    } catch (_) {}
+};
+
+// Config do aggregador — persiste em disco, carregada no startup
+const REPLIES_CONFIG_FILE = path.join(__dirname, 'replies_config.json');
+let _repliesGroupJid = process.env.REPLIES_GROUP_JID || '';
+let _repliesInstance = process.env.REPLIES_INSTANCE  || '';
+
+const _loadRepliesConfig = () => {
+    try {
+        if (!_repliesGroupJid && fs.existsSync(REPLIES_CONFIG_FILE)) {
+            const cfg = JSON.parse(fs.readFileSync(REPLIES_CONFIG_FILE, 'utf8'));
+            if (cfg.groupJid) _repliesGroupJid = cfg.groupJid;
+            if (cfg.instance) _repliesInstance = cfg.instance;
+        }
+    } catch (_) {}
+};
+const _saveRepliesConfig = () => {
+    try { fs.writeFileSync(REPLIES_CONFIG_FILE, JSON.stringify({ groupJid: _repliesGroupJid, instance: _repliesInstance }), 'utf8'); } catch (_) {}
+};
+_loadRepliesConfig();
+
+const extractText = (msg) => {
+    if (!msg) return null;
+    return msg.conversation
+        || msg.extendedTextMessage?.text
+        || msg.imageMessage?.caption
+        || msg.videoMessage?.caption
+        || msg.documentMessage?.caption
+        || null;
+};
+
+const classifyMessage = (msg) => {
+    if (!msg) return { type: 'unknown', label: '❓ Mensagem desconhecida' };
+    if (msg.conversation || msg.extendedTextMessage)  return { type: 'text' };
+    if (msg.reactionMessage)  return { type: 'reaction',  emoji: msg.reactionMessage.text || '👍' };
+    if (msg.imageMessage)     return { type: 'image',     label: '🖼️ Imagem' };
+    if (msg.audioMessage)     return { type: 'audio',     label: '🎙️ Áudio de voz' };
+    if (msg.videoMessage)     return { type: 'video',     label: '🎬 Vídeo (não encaminhado)' };
+    if (msg.stickerMessage)   return { type: 'sticker',   label: '🎭 Figurinha (não encaminhada)' };
+    if (msg.documentMessage)  return { type: 'document',  label: '📄 Documento' };
+    return { type: 'unknown', label: '❓ Mensagem não identificada' };
+};
+
+const handleIncomingReply = async (event) => {
+    if (!_repliesGroupJid) return;
+
+    // Se não há instância fixa configurada, auto-seleciona qualquer zap conectado
+    // (preferindo um diferente do que recebeu a mensagem, para não usar o mesmo chip)
+    const senderInstance = _repliesInstance
+        || [..._connectedInstances].find(i => i !== event.instance)
+        || [..._connectedInstances][0]
+        || null;
+
+    if (!senderInstance) {
+        console.log('[REPLIES] Nenhum zap conectado disponível para encaminhar — mensagem ignorada');
+        return;
+    }
+
+    const messages = Array.isArray(event.data) ? event.data : [event.data];
+    const NOW_S    = Date.now() / 1000;
+    for (const msg of messages) {
+        if (!msg?.key) continue;
+        if (msg.key.fromMe) continue;                              // mensagem nossa — ignora
+        if (!msg.message)   continue;                              // stub/notificação sem conteúdo
+
+        // Descarta mensagens de protocolo (editar, apagar)
+        if (msg.message.protocolMessage) continue;
+
+        // Descarta se não há conteúdo reconhecível para o usuário
+        // (messageContextInfo sozinho = metadata de dispositivo, não mensagem real)
+        const hasContent = msg.message.conversation
+            || msg.message.extendedTextMessage
+            || msg.message.imageMessage
+            || msg.message.audioMessage
+            || msg.message.videoMessage
+            || msg.message.reactionMessage
+            || msg.message.stickerMessage
+            || msg.message.documentMessage;
+        if (!hasContent) continue;
+
+        // Descarta mensagens antigas do histórico (mais de 5 min) — evita flood no startup
+        const ts = Number(msg.messageTimestamp || 0);
+        if (ts && (NOW_S - ts) > 300) continue;
+
+        const remoteJid = msg.key.remoteJid || '';
+        if (remoteJid.endsWith('@g.us')) continue;                 // msg de grupo — ignora
+
+        const senderNumber = remoteJid.replace('@s.whatsapp.net', '').replace(/\D/g, '');
+        if (_ownNumbers.has(senderNumber)) continue;               // próprio zap (warmup) — ignora
+        if (loadIgnoreNumbers().has(senderNumber)) continue;       // lista manual — ignora
+
+        const instance  = event.instance || '?';
+        const pushName  = msg.pushName || '';
+        const msgObj    = msg.message || {};
+        const kind      = classifyMessage(msgObj);
+        const text      = extractText(msgObj);
+
+        const header = `📩 *Resposta recebida*\n*Via:* ${instance}\n*Número:* +${senderNumber}\n*Nome:* ${pushName || '—'}\n──────────────`;
+
+        const GRP_TIMEOUT = 120000;
+        // Evolution API rejeita @g.us no campo number — passa só o ID numérico
+        const grpNumber = _repliesGroupJid.replace('@g.us', '').replace('@s.whatsapp.net', '');
+
+        if (kind.type === 'reaction') {
+            await evolution.sendText(senderInstance, grpNumber,
+                `${header}\n${kind.emoji} reagiu à sua mensagem`, GRP_TIMEOUT).catch(() => {});
+
+        } else if (kind.type === 'text') {
+            await evolution.sendText(senderInstance, grpNumber,
+                `${header}\n${text}`, GRP_TIMEOUT).catch(() => {});
+
+        } else if (kind.type === 'image') {
+            const caption = text ? `\n${text}` : '';
+            await evolution.sendText(senderInstance, grpNumber,
+                `${header}\n${kind.label}${caption}`, GRP_TIMEOUT).catch(() => {});
+            evolution.getMediaBase64(instance, msg).then(base64 => {
+                if (base64) return evolution.sendMedia(senderInstance, grpNumber,
+                    base64, 'image', text || '');
+            }).catch(() => {});
+
+        } else if (kind.type === 'audio') {
+            await evolution.sendText(senderInstance, grpNumber,
+                `${header}\n${kind.label}`, GRP_TIMEOUT).catch(() => {});
+            evolution.getMediaBase64(instance, msg).then(base64 => {
+                if (base64) return evolution.sendAudio(senderInstance, grpNumber, base64);
+            }).catch(() => {});
+
+        } else {
+            await evolution.sendText(senderInstance, grpNumber,
+                `${header}\n${kind.label}`, GRP_TIMEOUT).catch(() => {});
+        }
+
+        console.log(`[REPLIES] ${instance} ← ${pushName || senderNumber} (${kind.type}) → encaminhado`);
+    }
+};
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -36,7 +211,7 @@ const MEDIA_HOST    = process.env.MEDIA_HOST    || `http://host.docker.internal:
 const WEBHOOK_BASE  = process.env.WEBHOOK_BASE  || `http://host.docker.internal:${PORT}`;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads',      express.static(path.join(__dirname, 'uploads')));
 app.use('/warmup_media', express.static(path.join(__dirname, 'warmup_media')));
@@ -76,6 +251,14 @@ const uploadMedia = multer({
         await initSchema();
         console.log('🔗 [STARTUP] Configurando ADB...');
         await setupAllAdbForwards();
+        await refreshOwnNumbers();
+        // Popula instâncias conectadas para auto-seleção do remetente de replies
+        try {
+            const insts = await evolution.fetchInstances();
+            insts.filter(i => (i.connectionStatus || i.instance?.state || i.state) === 'open')
+                 .forEach(i => _connectedInstances.add(i.instanceName || i.name));
+            if (_connectedInstances.size) console.log(`[REPLIES] ${_connectedInstances.size} zap(s) conectados detectados.`);
+        } catch (_) {}
         const cycle = await getInterruptedCycle();
         if (cycle) console.log(`⚠️ [STARTUP] Campanha interrompida detectada (ID: ${cycle.id}).`);
         console.log('✅ [STARTUP] Sistema pronto!\n');
@@ -85,7 +268,8 @@ const uploadMedia = multer({
 })();
 
 // cycleId da campanha ativa — usado pelo crash handler para salvar relatório
-let _activeCycleId = null;
+let _activeCycleId  = null;
+let _campaignActive = false;
 
 const crashHandler = async (type, err) => {
     console.error(`🚨 [CRASH] ${type}:`, err?.message || err);
@@ -103,7 +287,10 @@ const crashHandler = async (type, err) => {
 };
 
 process.on('uncaughtException',  (err) => crashHandler('uncaughtException',  err));
-process.on('unhandledRejection', (err) => crashHandler('unhandledRejection', err));
+process.on('unhandledRejection', (err) => {
+    // Loga mas NÃO derruba o servidor — rejeições isoladas não devem matar a campanha
+    console.error('⚠️ [WARN] unhandledRejection (ignorado):', err?.message || err);
+});
 
 // ── Geral ─────────────────────────────────────────────────────────────────────
 
@@ -120,26 +307,29 @@ app.get('/api/dashboard-stats', async (req, res) => {
 
 app.get('/api/zaps-status', async (req, res) => {
     try {
-        const instances    = await evolution.fetchInstances();
-        const instanceMap  = {};
+        const instances = await evolution.fetchInstances();
+        const instanceMap = {};
         instances.forEach(inst => {
             const name  = inst.instanceName || inst.name;
             const state = inst.connectionStatus || inst.instance?.state || inst.state || 'close';
             if (name) instanceMap[name] = state;
         });
 
+        const ADMIN_ZAP_ID = process.env.ADMIN_ZAP || 'WA-49';
         const status = [];
-        for (let i = 1; i <= 48; i++) {
-            const accountId   = `WA-${String(i).padStart(2, '0')}`;
+        for (let i = 1; i <= 49; i++) {
+            const accountId   = i <= 48 ? `WA-${String(i).padStart(2, '0')}` : ADMIN_ZAP_ID;
             const hasInstance = accountId in instanceMap;
             const state       = hasInstance ? instanceMap[accountId] : 'close';
-            status.push({ accountId, connected: state === 'open', state, hasInstance });
+            const isAdmin     = accountId === ADMIN_ZAP_ID;
+            status.push({ accountId, connected: state === 'open', state, hasInstance, isAdmin });
         }
         res.json(status);
     } catch (err) {
         res.status(500).json({ error: 'Erro ao consultar Evolution API: ' + err.message });
     }
 });
+
 
 app.post('/api/whatsapp/start', async (req, res) => {
     const { accountId } = req.body;
@@ -148,12 +338,13 @@ app.post('/api/whatsapp/start', async (req, res) => {
     try {
         const proxyConfig = await getProxyConfigForAccount(accountId);
 
+        let instanceExisted = false;
         try {
             await evolution.createInstance(accountId, proxyConfig);
         } catch (createErr) {
             const status = createErr.response?.status;
             if (status !== 400 && status !== 403) throw createErr;
-            // 400 = já existe | 403 = instância existe após logout — continua
+            instanceExisted = true; // 400/403 = já existe
         }
 
         evolution.setWebhook(accountId, `${WEBHOOK_BASE}/webhook/evolution`)
@@ -162,6 +353,13 @@ app.post('/api/whatsapp/start', async (req, res) => {
         const state = await evolution.getConnectionState(accountId);
         if (state === 'open') {
             return res.json({ connected: true, message: `${accountId} já está conectado.` });
+        }
+
+        // Instância desconectada: limpa sessão expirada para forçar novo QR
+        // Baileys fica em 'close' após reconnect falho — logout reseta o estado
+        if (instanceExisted && state === 'close') {
+            try { await evolution.logoutInstance(accountId); } catch (_) {}
+            await new Promise(r => setTimeout(r, 2000));
         }
 
         // QR pode levar alguns segundos para ser gerado pelo Baileys
@@ -186,40 +384,13 @@ app.get('/api/whatsapp/qrcode/:accountId', async (req, res) => {
     }
 });
 
-app.post('/api/whatsapp/pairing-code/:accountId', async (req, res) => {
-    const { accountId } = req.params;
-    const { phoneNumber } = req.body;
-    if (!phoneNumber) return res.status(400).json({ error: 'Número de telefone obrigatório.' });
+// Endpoint leve — só estado, sem chamar /instance/connect (que regenera QR)
+app.get('/api/whatsapp/state/:accountId', async (req, res) => {
     try {
-        const state = await evolution.getConnectionState(accountId);
-        if (state === 'open') return res.status(400).json({ error: 'Zap já está conectado. Desconecte antes de usar o código de pareamento.' });
-
-        // Remove instância anterior para garantir estado limpo
-        try { await evolution.deleteInstance(accountId); } catch (_) {}
-        await new Promise(r => setTimeout(r, 2000));
-
-        // Cria instância — qrcode=true para forçar conexão automática do socket
-        pairingCodeStore.delete(accountId);
-        await evolution.createInstance(accountId, null, true, phoneNumber, true);
-        evolution.setWebhook(accountId, `${WEBHOOK_BASE}/webhook/evolution`).catch(() => {});
-
-        // Aguarda Baileys conectar (~3s), depois tenta POST /instance/requestCode
-        // (endpoint oficial) + GET /instance/connect como fallback
-        await new Promise(r => setTimeout(r, 3_000));
-
-        const deadline = Date.now() + 25_000;
-        let code = null;
-        while (Date.now() < deadline) {
-            code = pairingCodeStore.get(accountId) || await evolution.getPairingCode(accountId, phoneNumber);
-            if (code) { console.log(`[PAIRING] ${accountId}: código → ${code}`); break; }
-            await new Promise(r => setTimeout(r, 500));
-        }
-        pairingCodeStore.delete(accountId);
-
-        if (!code) return res.status(500).json({ error: 'Evolution API não retornou o código. Tente novamente.' });
-        res.json({ code });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+        const state = await evolution.getConnectionState(req.params.accountId);
+        res.json({ state });
+    } catch (_) {
+        res.json({ state: 'close' });
     }
 });
 
@@ -229,20 +400,18 @@ app.post('/webhook/evolution', (req, res) => {
     if (!event?.event) return;
 
     if (event.event === 'CONNECTION_UPDATE') {
-        const { instance, state } = event.data || {};
+        const instance = event.instance || event.data?.instance;
+        const state    = (event.data || {}).state;
         console.log(`[WEBHOOK] ${instance}: ${state}`);
-        return;
-    }
-
-    if (event.event === 'QRCODE_UPDATED') {
-        const instanceName = event.instance || event.data?.instance;
-        const d = event.data || {};
-        console.log(`[WEBHOOK QRCODE] ${instanceName}:`, JSON.stringify(d).slice(0, 200));
-        // Pairing code chega aqui quando instância criada com qrcode=false
-        const code = d?.pairingCode || d?.qrcode?.pairingCode || d?.code || null;
-        if (code && !String(code).startsWith('2@') && String(code).length < 20) {
-            pairingCodeStore.set(instanceName, code);
-            console.log(`[PAIRING STORE] ${instanceName}: código guardado → ${code}`);
+        if (instance) {
+            clearOwnerCacheFor(instance);
+            if (state === 'open') {
+                _connectedInstances.add(instance);
+                refreshOwnNumbers().catch(() => {});
+            }
+            if (state === 'close') {
+                _connectedInstances.delete(instance);
+            }
         }
         return;
     }
@@ -255,23 +424,18 @@ app.post('/webhook/evolution', (req, res) => {
             const keyId  = upd?.key?.id     || upd?.keyId;
             const status = upd?.update?.status ?? upd?.status;
             const isAcked = status >= 2 || status === 'SERVER_ACK' || status === 'DELIVERY_ACK' || status === 'READ';
-            if (fromMe && keyId && isAcked) notifyAck(keyId);
+            if (fromMe && keyId && isAcked) {
+                notifyAck(keyId);
+            }
         }
     }
 
-});
-
-app.post('/api/whatsapp/disconnect/:accountId', async (req, res) => {
-    const { accountId } = req.params;
-    if (!accountId || !/^WA-\d{2}$/.test(accountId))
-        return res.status(400).json({ error: 'ID inválido.' });
-    try {
-        await evolution.logoutInstance(accountId);
-        console.log(`🔌 [${accountId}] Desconectado (sessão mantida).`);
-        res.json({ message: `${accountId} desconectado. O cache foi mantido — reconecte via QR.` });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    if (event.event === 'MESSAGES_UPSERT' || event.event === 'messages.upsert') {
+        handleIncomingReply(event).catch(err =>
+            console.warn('[REPLIES] Erro no handler:', err?.message || err)
+        );
     }
+
 });
 
 app.delete('/api/whatsapp/:accountId', async (req, res) => {
@@ -280,14 +444,50 @@ app.delete('/api/whatsapp/:accountId', async (req, res) => {
         return res.status(400).json({ error: 'ID inválido.' });
 
     try {
-        try { await evolution.logoutInstance(accountId); } catch (_) {}
-        try { await evolution.deleteInstance(accountId); } catch (_) {}
-        // Garante remoção dos arquivos de autenticação do Baileys no volume Docker
+        const stateNow = await evolution.getConnectionState(accountId).catch(() => 'close');
+
+        // Passo 1: deleta diretamente do banco da Evolution API (localhost:5432/evolution)
+        // O container usa hostname interno 'postgres', mas a porta 5432 está mapeada no host.
+        const evoDbUrl = `postgresql://medusa:${process.env.POSTGRES_PASSWORD || 'medusa'}@localhost:5432/evolution`;
+        try {
+            const client = new pg.Client({ connectionString: evoDbUrl, connectionTimeoutMillis: 5000 });
+            await client.connect();
+            try {
+                const r = await client.query(`DELETE FROM "Instance" WHERE name = $1`, [accountId]);
+                console.log(`[DELETE] Evolution DB: ${r.rowCount} registro(s) de ${accountId} removido(s).`);
+            } finally {
+                await client.end().catch(() => {});
+            }
+        } catch (dbErr) {
+            console.warn(`[DELETE] DB direto falhou: ${dbErr.message}`);
+        }
+
+        // Passo 2: reinicia o socket Baileys para que perca a sessão em memória
+        if (stateNow === 'open' || stateNow === 'connecting') {
+            try { await evolution.restartInstance(accountId); } catch (_) {}
+            // Aguarda estado sair de 'open' (Baileys tenta reconectar mas DB está vazio)
+            for (let i = 0; i < 6; i++) {
+                const s = await evolution.getConnectionState(accountId).catch(() => 'close');
+                if (s !== 'open') break;
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+
+        // Passo 3: tenta deletar a instância via API (deve funcionar agora que o DB está limpo)
+        try {
+            await evolution.deleteInstance(accountId);
+            console.log(`[DELETE] API removeu ${accountId}.`);
+        } catch (e) {
+            console.warn(`[DELETE] API falhou (${e.response?.status}) após limpeza do DB.`);
+        }
+
         exec(`docker exec medusa_evolution rm -rf /evolution/instances/${accountId}`, () => {});
-        console.log(`🗑️ [${accountId}] Instância e cache Baileys removidos.`);
-        res.json({ message: `${accountId} desconectado e removido com sucesso.` });
+        _connectedInstances.delete(accountId);
+        console.log(`🗑️ [${accountId}] Removido.`);
+        res.json({ message: `${accountId} removido com sucesso.` });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error(`❌ [DELETE] ${accountId}:`, err.message);
+        res.status(500).json({ error: `Erro inesperado ao remover ${accountId}: ${err.message}` });
     }
 });
 
@@ -317,13 +517,43 @@ app.post('/api/whatsapp/start-bulk', async (req, res) => {
     })();
 });
 
+app.post('/api/whatsapp/reset-all', async (req, res) => {
+    try {
+        const evoDbUrl = `postgresql://medusa:${process.env.POSTGRES_PASSWORD || 'medusa'}@localhost:5432/evolution`;
+        const client = new pg.Client({ connectionString: evoDbUrl, connectionTimeoutMillis: 5000 });
+        await client.connect();
+        let count = 0;
+        try {
+            const r = await client.query('DELETE FROM "Instance"');
+            count = r.rowCount;
+            console.log(`[RESET-ALL] ${count} instância(s) removida(s) do banco Evolution.`);
+        } finally {
+            await client.end().catch(() => {});
+        }
+        exec('docker compose restart evolution', { cwd: process.cwd() }, (err) => {
+            if (err) console.warn('[RESET-ALL] docker compose restart falhou:', err.message);
+            else console.log('[RESET-ALL] Evolution API reiniciando.');
+        });
+        _connectedInstances.clear();
+        res.json({ message: `✅ ${count} sessão(ões) apagada(s). Evolution API reiniciando — aguarde ~30s antes de conectar.` });
+    } catch (err) {
+        console.error('[RESET-ALL] Erro:', err.message);
+        res.status(500).json({ error: `Erro ao limpar sessões: ${err.message}` });
+    }
+});
+
 // ── Gerenciador de listas ─────────────────────────────────────────────────────
 
 app.get('/api/listas', (_req, res) => {
     try {
-        const files = fs.readdirSync(LISTAS_DIR)
+        const active = readActiveState();
+        const files  = fs.readdirSync(LISTAS_DIR)
             .filter(f => /\.(xlsx|xls)$/i.test(f) && !f.startsWith('.'))
-            .map(f => ({ name: f, size: fs.statSync(path.join(LISTAS_DIR, f)).size }));
+            .map(f => ({
+                name:   f,
+                size:   fs.statSync(path.join(LISTAS_DIR, f)).size,
+                active: active[f] !== false,
+            }));
         res.json(files);
     } catch (_) { res.json([]); }
 });
@@ -357,6 +587,99 @@ app.post('/api/listas/process', async (req, res) => {
             ? `${added} adicionados. ${skipped} já estavam na fila e foram ignorados.`
             : `${added} números adicionados à fila.`;
         res.json({ message: msg, totalRecebidos: result.totalRecebidos, totalUnicos: result.totalUnicos, added, skipped });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Gestão de listas ─────────────────────────────────────────────────────────
+
+/** GET /api/list-mgmt — todas as listas com metadata (count, active, isTemp) */
+app.get('/api/list-mgmt', (_req, res) => {
+    try { res.json(getAllLists()); } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/** GET /api/list-mgmt/:filename/contacts?page=1&pageSize=100&q= */
+app.get('/api/list-mgmt/:filename/contacts', (req, res) => {
+    try {
+        const page     = Math.max(1, parseInt(req.query.page || '1', 10));
+        const pageSize = Math.min(500, parseInt(req.query.pageSize || '100', 10));
+        const q        = (req.query.q || '').trim();
+        const phones   = readListPhones(req.params.filename);
+        const filtered = q ? phones.filter(p => p.includes(q)) : phones;
+        const start    = (page - 1) * pageSize;
+        res.json({ total: filtered.length, page, pageSize, phones: filtered.slice(start, start + pageSize) });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/** POST /api/list-mgmt/:filename/contacts — adiciona um número */
+app.post('/api/list-mgmt/:filename/contacts', (req, res) => {
+    try {
+        const phone = addPhoneToList(req.params.filename, req.body.phone);
+        res.json({ message: `${phone} adicionado.`, phone });
+    } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+/** DELETE /api/list-mgmt/:filename/contacts/:phone — remove um número */
+app.delete('/api/list-mgmt/:filename/contacts/:phone', (req, res) => {
+    try {
+        removePhoneFromList(req.params.filename, req.params.phone);
+        res.json({ message: `${req.params.phone} removido.` });
+    } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+/** PATCH /api/list-mgmt/:filename/active — habilita/desabilita para painel */
+app.patch('/api/list-mgmt/:filename/active', (req, res) => {
+    try {
+        setListActive(req.params.filename, !!req.body.active);
+        res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/** DELETE /api/list-mgmt/:filename — exclui lista */
+app.delete('/api/list-mgmt/:filename', (req, res) => {
+    try {
+        deleteListFile(req.params.filename);
+        res.json({ message: `${req.params.filename} removido.` });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/** POST /api/list-mgmt/merge — mescla listas com dedup */
+app.post('/api/list-mgmt/merge', (req, res) => {
+    try {
+        const { filenames, outputName } = req.body;
+        if (!filenames || filenames.length < 2)
+            return res.status(400).json({ error: 'Selecione pelo menos 2 listas.' });
+        const phones = mergeLists(filenames);
+        if (!phones.length) return res.status(400).json({ error: 'Nenhum número válido nas listas.' });
+        const base     = (outputName || 'Mesclagem').replace(/[^a-zA-Z0-9_\-]/g, '_');
+        const filename = `${base}_${Date.now()}.xlsx`;
+        writeListPhones(filename, phones);
+        res.json({ message: `Mesclagem concluída: ${phones.length} números únicos.`, filename, count: phones.length });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/** POST /api/list-mgmt/create — cria lista vazia */
+app.post('/api/list-mgmt/create', (req, res) => {
+    try {
+        const { filename } = req.body;
+        if (!filename) return res.status(400).json({ error: 'filename é obrigatório.' });
+        const name = path.basename(filename.endsWith('.xlsx') ? filename : filename + '.xlsx');
+        writeListPhones(name, []);
+        res.json({ message: `${name} criado.`, filename: name });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/** POST /api/list-mgmt/split — divide lista em N partes */
+app.post('/api/list-mgmt/split', (req, res) => {
+    try {
+        const { filename, n } = req.body;
+        const nParts = parseInt(n, 10);
+        if (!filename || !nParts || nParts < 2)
+            return res.status(400).json({ error: 'filename e n (≥2) são obrigatórios.' });
+        const phones = readListPhones(filename);
+        if (!phones.length) return res.status(400).json({ error: 'Lista vazia.' });
+        const base  = path.basename(filename, path.extname(filename)).replace(/[^a-zA-Z0-9_\-]/g, '_');
+        const parts = splitIntoN(phones, nParts, base);
+        res.json({ message: `${parts.length} parte(s) criada(s).`, parts });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -436,6 +759,9 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
         if (activeAccountsList.length === 0)
             return res.status(400).json({ error: 'Nenhuma conta selecionada.' });
 
+        if (_campaignActive)
+            return res.status(409).json({ error: 'Já existe uma campanha em andamento. Aguarde ou pare antes de iniciar outra.' });
+
         const totalPending = await countPending();
         if (totalPending === 0)
             return res.status(400).json({ error: 'Fila vazia. Processe uma lista primeiro.' });
@@ -473,13 +799,15 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
         };
 
         (async () => {
-            _activeCycleId = cycleId;
+            _activeCycleId  = cycleId;
+            _campaignActive = true;
             try {
                 await runCampaignLoop(activeAccountsList, campaignConfig, cycleId);
             } catch (err) {
                 console.error('[CAMPAIGN] Erro não tratado no loop da campanha:', err);
             } finally {
-                _activeCycleId = null;
+                _activeCycleId  = null;
+                _campaignActive = false;
                 if (req.file) {
                     const filePath = path.join(__dirname, 'uploads', req.file.filename);
                     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -569,6 +897,137 @@ app.post('/api/warmup-chips/scheduled', async (req, res) => {
         startScheduledWarmup(accounts, parseInt(level), startDatetime || null, endDatetime, windowStart, windowEnd);
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// Configura proxy 4G em todos os zaps conectados baseado no ZTE correspondente
+app.post('/api/setup-proxies', async (req, res) => {
+    try {
+        const instances = await evolution.fetchInstances();
+        const connected = instances.filter(i => (i.connectionStatus || i.instance?.state || i.state) === 'open');
+
+        let ok = 0, semZte = 0, falhas = 0;
+        const resultados = [];
+
+        for (const inst of connected) {
+            const name  = inst.name || inst.instanceName;
+            const proxy = getStaticProxyForAccount(name);
+            if (!proxy) {
+                semZte++;
+                resultados.push(`⚠️ ${name}: sem ZTE mapeado`);
+                continue;
+            }
+            try {
+                await evolution.setProxy(name, proxy);
+                ok++;
+                resultados.push(`✅ ${name}: 4G via porta ${proxy.port}`);
+                console.log(`[PROXY] ${name} → host.docker.internal:${proxy.port}`);
+            } catch (err) {
+                falhas++;
+                resultados.push(`❌ ${name}: ${err.response?.data?.message || err.message}`);
+                console.error(`[PROXY] Falha em ${name}:`, err.message);
+            }
+        }
+
+        res.json({
+            message: `${ok} zap(s) configurados com 4G, ${semZte} sem ZTE mapeado, ${falhas} falha(s).`,
+            detalhes: resultados,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ── Aggregador de respostas — endpoints ──────────────────────────────────────
+
+// Lista grupos de uma instância conectada
+app.get('/api/groups', async (req, res) => {
+    const { instance } = req.query;
+    if (!instance) return res.status(400).json({ error: 'instance obrigatório' });
+    try {
+        const groups = await evolution.fetchGroups(instance);
+        res.json(groups.map(g => ({
+            jid:  g.id,
+            name: g.subject || g.name || g.id,
+            size: g.size || g.participants?.length || 0,
+        })));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Lê config atual
+app.get('/api/config/replies', (req, res) => {
+    res.json({ groupJid: _repliesGroupJid, instance: _repliesInstance });
+});
+
+// Salva config (persiste em memória; reiniciar lê do .env se preenchido)
+app.post('/api/config/replies', async (req, res) => {
+    const { groupJid, instance } = req.body;
+    if (!groupJid || !instance)
+        return res.status(400).json({ error: 'groupJid e instance obrigatórios' });
+    _repliesGroupJid = groupJid;
+    _repliesInstance = instance;
+    _saveRepliesConfig();
+    await refreshOwnNumbers(); // atualiza auto-ignore com estado atual dos zaps
+    console.log(`[REPLIES] Configurado: ${instance} → grupo ${groupJid}`);
+    res.json({ ok: true, groupJid, instance });
+});
+
+// Força atualização da lista de números próprios (auto-ignore warmup)
+app.post('/api/config/replies/refresh-ignore', async (req, res) => {
+    await refreshOwnNumbers();
+    res.json({ ok: true, ownNumbers: [..._ownNumbers].length });
+});
+
+// Desativa aggregador em memória sem apagar o arquivo de config
+app.post('/api/config/replies/disable', (req, res) => {
+    _repliesGroupJid = '';
+    _repliesInstance = '';
+    console.log('[REPLIES] Aggregador desativado temporariamente.');
+    res.json({ ok: true });
+});
+
+// Reativa aggregador carregando do arquivo salvo
+app.post('/api/config/replies/enable', (req, res) => {
+    _loadRepliesConfig();
+    console.log(`[REPLIES] Aggregador reativado: ${_repliesInstance} → ${_repliesGroupJid}`);
+    if (!_repliesGroupJid) return res.status(400).json({ error: 'Nenhuma configuração salva. Configure e salve primeiro.' });
+    res.json({ ok: true, instance: _repliesInstance, groupJid: _repliesGroupJid });
+});
+
+// Testa se o sistema consegue enviar para o grupo configurado
+app.post('/api/config/replies/test', async (req, res) => {
+    if (!_repliesGroupJid)
+        return res.status(400).json({ error: 'REPLIES_GROUP_JID não configurado.' });
+
+    const testInstance = _repliesInstance || [..._connectedInstances][0] || null;
+    if (!testInstance)
+        return res.status(400).json({ error: 'Nenhum zap conectado disponível para o teste.' });
+
+    let groupFound = false;
+    try {
+        const groups = await evolution.fetchGroups(testInstance);
+        groupFound = groups.some(g => g.id === _repliesGroupJid);
+        if (!groupFound) {
+            return res.status(400).json({
+                error: `${testInstance} não é membro do grupo ${_repliesGroupJid}. Adicione o zap ao grupo no WhatsApp primeiro.`,
+            });
+        }
+    } catch (_) {}
+
+    const numberParam = _repliesGroupJid.replace('@g.us', '').replace('@s.whatsapp.net', '');
+    try {
+        await evolution.sendText(testInstance, numberParam,
+            '✅ *Medusa — Teste de Aggregador*\nSe você recebeu esta mensagem, o encaminhamento está funcionando!', 120000);
+        res.json({ ok: true, instance: testInstance, groupJid: _repliesGroupJid, numberUsed: numberParam });
+    } catch (err) {
+        res.status(500).json({
+            error: err.message,
+            detalhe: err.response?.data,
+            numberUsed: numberParam,
+            groupJid: _repliesGroupJid,
+        });
     }
 });
 

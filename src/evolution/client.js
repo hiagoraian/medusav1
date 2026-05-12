@@ -11,17 +11,13 @@ const api = axios.create({
  * @param {string} instanceName
  * @param {object|null} proxyConfig - { host, port } para rotear via 4G, ou null para Wi-Fi
  */
-export const createInstance = async (instanceName, proxyConfig = null, withQR = true, phoneNumber = null, pairingMode = false) => {
+export const createInstance = async (instanceName, proxyConfig = null, withQR = true, phoneNumber = null) => {
     const body = {
         instanceName,
         qrcode:      withQR,
         integration: 'WHATSAPP-BAILEYS',
     };
     if (phoneNumber) body.number = phoneNumber.replace(/\D/g, '');
-    if (pairingMode) {
-        body.pairing           = true;
-        body.preferPairingCode = true;
-    }
     if (proxyConfig) {
         body.proxyHost     = proxyConfig.host;
         body.proxyPort     = String(proxyConfig.port);
@@ -29,35 +25,6 @@ export const createInstance = async (instanceName, proxyConfig = null, withQR = 
     }
     const { data } = await api.post('/instance/create', body);
     return data;
-};
-
-/**
- * Solicita pairing code via POST /instance/requestCode (endpoint oficial v2).
- * Fallback: lê pairingCode do GET /instance/connect.
- */
-export const getPairingCode = async (instanceName, phoneNumber) => {
-    const number = String(phoneNumber || '').replace(/\D/g, '');
-
-    // Endpoint oficial de pairing code no Evolution API v2
-    if (number) {
-        try {
-            const { data } = await api.post(`/instance/requestCode/${instanceName}`, { number });
-            console.log(`[PAIRING requestCode] ${instanceName}:`, JSON.stringify(data).slice(0, 200));
-            const code = data?.pairingCode || data?.code || null;
-            if (code && !String(code).startsWith('2@') && String(code).length < 20) return code;
-        } catch (err) {
-            console.log(`[PAIRING requestCode] ${instanceName}: ${err.response?.status} ${err.message}`);
-        }
-    }
-
-    // Fallback: GET /instance/connect (funciona com qrcode=true + pairing flags)
-    try {
-        const { data } = await api.get(`/instance/connect/${instanceName}`);
-        const code = data?.pairingCode || null;
-        if (code && !String(code).startsWith('2@') && String(code).length < 20) return code;
-    } catch (_) {}
-
-    return null;
 };
 
 /** Retorna o QR code base64 da instância, ou null se já conectada. */
@@ -90,6 +57,14 @@ export const fetchInstances = async () => {
     }
 };
 
+/** Reinicia o socket Baileys da instância (força reconexão real). */
+export const restartInstance = async (instanceName) => {
+    try {
+        const { data } = await api.put(`/instance/restart/${instanceName}`);
+        return data;
+    } catch (_) { return null; }
+};
+
 /** Desconecta a sessão sem apagar a instância. */
 export const logoutInstance = async (instanceName) => {
     const { data } = await api.delete(`/instance/logout/${instanceName}`);
@@ -106,8 +81,9 @@ export const deleteInstance = async (instanceName) => {
  * Envia texto.
  * @param {string} number - Só dígitos, ex: 5511999999999
  */
-export const sendText = async (instanceName, number, text) => {
-    const { data } = await api.post(`/message/sendText/${instanceName}`, { number, text });
+export const sendText = async (instanceName, number, text, timeoutMs) => {
+    const cfg = timeoutMs ? { timeout: timeoutMs } : {};
+    const { data } = await api.post(`/message/sendText/${instanceName}`, { number, text }, cfg);
     return data;
 };
 
@@ -175,6 +151,26 @@ export const sendAudio = async (instanceName, number, audioBase64) => {
     return data;
 };
 
+/** Configura ou atualiza proxy em instância já existente. */
+export const setProxy = async (instanceName, proxyConfig) => {
+    const { data } = await api.post(`/proxy/set/${instanceName}`, {
+        enabled:  true,
+        host:     proxyConfig.host,
+        port:     String(proxyConfig.port),
+        protocol: 'http',
+        username: '',
+        password: '',
+    });
+    return data;
+};
+
+/** Remove proxy da instância — força uso de Wi-Fi. Falha silenciosa. */
+export const clearProxy = async (instanceName) => {
+    try {
+        await api.post(`/proxy/set/${instanceName}`, { enabled: false });
+    } catch (_) {}
+};
+
 /** Envia indicador "digitando..." antes de uma mensagem. Falha silenciosa. */
 export const sendTyping = async (instanceName, number, durationMs = 2000) => {
     try {
@@ -185,4 +181,4 @@ export const sendTyping = async (instanceName, number, durationMs = 2000) => {
     } catch (_) {}
 };
 
-export default { createInstance, getPairingCode, getQRCode, getConnectionState, fetchInstances, logoutInstance, deleteInstance, sendText, sendMedia, setWebhook, fetchGroups, getMediaBase64, sendAudio, sendTyping };
+export default { createInstance, getQRCode, getConnectionState, fetchInstances, restartInstance, logoutInstance, deleteInstance, sendText, sendMedia, setWebhook, fetchGroups, getMediaBase64, sendAudio, sendTyping, setProxy, clearProxy };

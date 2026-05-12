@@ -37,9 +37,9 @@ export const initSchema = async () => {
             end_time       TIMESTAMPTZ
         );
 
-        CREATE INDEX IF NOT EXISTS idx_mq_status  ON messages_queue(status);
-        CREATE INDEX IF NOT EXISTS idx_mq_cycle   ON messages_queue(cycle_id);
-        CREATE INDEX IF NOT EXISTS idx_mq_phone   ON messages_queue(phone_number);
+        CREATE INDEX IF NOT EXISTS idx_mq_status_id    ON messages_queue(status, id);
+        CREATE INDEX IF NOT EXISTS idx_mq_cycle_status ON messages_queue(cycle_id, status);
+        CREATE INDEX IF NOT EXISTS idx_mq_phone        ON messages_queue(phone_number);
     `);
     console.log('✅ [PG] Schema sincronizado.');
 };

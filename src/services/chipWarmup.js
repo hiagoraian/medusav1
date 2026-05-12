@@ -12,6 +12,18 @@ const WARMUP_TEXT_PATH = path.resolve(__dirname, '../../textAquecimento.txt');
 const WARMUP_MEDIA_DIR = path.resolve(__dirname, '../../warmup_media');
 const MEDIA_HOST       = process.env.MEDIA_HOST || 'http://host.docker.internal:3000';
 
+const ADMIN_ZAP    = process.env.ADMIN_ZAP    || 'WA-49';
+const ADMIN_NUMBER = process.env.ADMIN_NUMBER  || '';
+
+const sendAdminNotification = async (text) => {
+    if (!ADMIN_NUMBER) return;
+    try {
+        const state = await evolution.getConnectionState(ADMIN_ZAP);
+        if (state !== 'open') return;
+        await evolution.sendText(ADMIN_ZAP, ADMIN_NUMBER, text);
+    } catch (_) {}
+};
+
 // ── Configuração de níveis ────────────────────────────────────────────────────
 //
 //  Níveis ligados à idade do chip:
@@ -34,7 +46,7 @@ const LEVEL_CONFIG = {
 // 65% do tempo: range normal (minS–maxS)
 // 25% do tempo: 1×–2× o máximo  (pessoa estava ocupada)
 // 10% do tempo: 2×–3× o máximo  (pessoa demorou mais)
-const warmupDelay = async (minS, maxS) => {
+const warmupDelay = async (minS, maxS, shouldContinue = () => true) => {
     const rand = Math.random();
     let seconds;
     if (rand < 0.65) {
@@ -44,7 +56,10 @@ const warmupDelay = async (minS, maxS) => {
     } else {
         seconds = maxS * 2 + Math.random() * maxS;
     }
-    await new Promise(r => setTimeout(r, Math.round(seconds * 1000)));
+    const end = Date.now() + Math.round(seconds * 1000);
+    while (shouldContinue() && Date.now() < end) {
+        await new Promise(r => setTimeout(r, Math.min(1000, end - Date.now())));
+    }
 };
 
 // ── Contadores diários por zap ────────────────────────────────────────────────
@@ -181,12 +196,15 @@ const getOwnerNumber = async (accountId) => {
     } catch (_) { return null; }
 };
 
-export const clearOwnerCache = () => _ownerCache.clear();
+export const clearOwnerCache    = () => _ownerCache.clear();
+export const clearOwnerCacheFor = (accountId) => _ownerCache.delete(accountId);
 
 // ── Conectividade ─────────────────────────────────────────────────────────────
 const isReady = async (accountId) => {
-    try { return (await evolution.getConnectionState(accountId)) === 'open'; }
-    catch (_) { return false; }
+    try {
+        const state = await evolution.getConnectionState(accountId);
+        return state === 'open';
+    } catch (_) { return false; }
 };
 
 const filterReady = async (accounts) => {
@@ -214,7 +232,7 @@ const pingPong = async (zapA, zapB, numA, numB, level, shouldContinue) => {
         }
     }
 
-    await warmupDelay(cfg.minDelayS, cfg.maxDelayS);
+    await warmupDelay(cfg.minDelayS, cfg.maxDelayS, shouldContinue);
 
     // B → A
     if (!shouldContinue()) return;
@@ -229,7 +247,7 @@ const pingPong = async (zapA, zapB, numA, numB, level, shouldContinue) => {
         }
     }
 
-    await warmupDelay(cfg.minDelayS, cfg.maxDelayS);
+    await warmupDelay(cfg.minDelayS, cfg.maxDelayS, shouldContinue);
 };
 
 // ── Montagem de pares (round-robin de torneio) ────────────────────────────────
@@ -286,7 +304,10 @@ export const runWarmupFor = async (activeAccounts, level = 2, durationSeconds = 
     let round = 0;
     while (shouldContinue()) {
         // Filtra zaps que ainda têm cota de mensagens
-        const alive = (await filterReady(withNum)).filter(id => numbers[id] && hasQuota(id, level));
+        const onlineNow = await filterReady(withNum);
+        // Remove permanentemente zaps que caíram — evita re-log a cada rodada
+        const stillOnline = withNum.filter(id => onlineNow.includes(id));
+        const alive = stillOnline.filter(id => hasQuota(id, level));
         if (alive.length < 2) {
             console.log('✅ [AQUECIMENTO] Todos os zaps atingiram o limite diário ou ficaram offline.');
             break;
@@ -324,6 +345,19 @@ export const startWarmup = async (accountsList, level = 2, rotateMins = 0) => {
         return;
     }
 
+    // Zaps inativos desde o início
+    const offlineAtStart = accountsList.filter(id => !active.includes(id));
+    const noNumber       = active.filter(id => !numbers[id]);
+    const inactiveAtStart = [...offlineAtStart, ...noNumber];
+
+    const startTime = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const inactiveLine = inactiveAtStart.length > 0
+        ? `\n❌ Inativos: ${inactiveAtStart.join(', ')}`
+        : '\n✅ Todos os zaps ativos';
+    await sendAdminNotification(
+        `🔥 *Aquecimento iniciado*\n\n🕐 ${startTime} | Nível ${level}\n👥 Zaps: ${withNum.length}${inactiveLine}`
+    );
+
     const cfg = LEVEL_CONFIG[level] || LEVEL_CONFIG[2];
     _manualRunning = true;
     _warmupState   = { running: true, level, zapCount: withNum.length, rotateMins, startedAt: Date.now() };
@@ -334,6 +368,7 @@ export const startWarmup = async (accountsList, level = 2, rotateMins = 0) => {
     const rotateIntervalMs = rotateMins > 0 ? rotateMins * 60_000 : 0;
     let   nextRotateAt     = rotateIntervalMs > 0 ? Date.now() + rotateIntervalMs : Infinity;
     let   round            = 0;
+    const felledDuring     = new Set(); // zaps que caíram durante a sessão
 
     console.log(`\n🔥 [AQUECIMENTO] Iniciado — ${withNum.length} zaps | nível ${level} | delay ${cfg.minDelayS}–${cfg.maxDelayS}s | limite ${cfg.maxMsgsPerDay} msgs/dia${rotateMins > 0 ? ` | rotação a cada ${rotateMins} min` : ''}`);
 
@@ -346,7 +381,11 @@ export const startWarmup = async (accountsList, level = 2, rotateMins = 0) => {
             resetDailyIfNewDay(active);
         }
 
-        const alive = (await filterReady(active)).filter(id => numbers[id] && hasQuota(id, level));
+        const onlineNow = await filterReady(active);
+        // Detecta quedas desta rodada
+        active.filter(id => !onlineNow.includes(id)).forEach(id => felledDuring.add(id));
+        active = active.filter(id => onlineNow.includes(id));
+        const alive = active.filter(id => numbers[id] && hasQuota(id, level));
         if (alive.length < 2) {
             console.log('✅ [AQUECIMENTO] Todos os zaps atingiram o limite diário ou ficaram offline.');
             _manualRunning = false;
@@ -367,9 +406,21 @@ export const startWarmup = async (accountsList, level = 2, rotateMins = 0) => {
     _manualRunning = false;
     _warmupState   = { running: false, level: 0, zapCount: 0, rotateMins: 0, startedAt: null };
     console.log('🛑 [AQUECIMENTO] Parado.');
+
+    const endTime  = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const totalMsg = withNum.reduce((sum, id) => sum + getDaily(id).msgs, 0);
+    const fellLine = felledDuring.size > 0
+        ? `\n🔴 Caíram durante: ${[...felledDuring].join(', ')}`
+        : '\n💚 Nenhum zap caiu';
+    await sendAdminNotification(
+        `✅ *Aquecimento encerrado*\n\n🕐 ${endTime}\n📊 Msgs enviadas: ${totalMsg}${fellLine}`
+    );
 };
 
-export const stopWarmup = () => { _manualRunning = false; };
+export const stopWarmup = () => {
+    _manualRunning = false;
+    _warmupState   = { running: false, level: 0, zapCount: 0, rotateMins: 0, startedAt: null };
+};
 
 // ── Helpers de janela horária ─────────────────────────────────────────────────
 
@@ -434,6 +485,9 @@ export const startScheduledWarmup = async (
 
     console.log(`🔥 [AQUECIMENTO] Agendado iniciado`);
     console.log(`   Janela: ${windowStart}–${windowEnd} | Fim: ${new Date(endMs).toLocaleString('pt-BR')}`);
+    await sendAdminNotification(
+        `🔥 *Aquecimento agendado iniciado*\n\n👥 Zaps: ${accountsList.length} | Nível ${level}\n⏰ Janela: ${windowStart}–${windowEnd}`
+    );
 
     while (_manualRunning && Date.now() < endMs) {
 
@@ -464,6 +518,7 @@ export const startScheduledWarmup = async (
     _manualRunning = false;
     _warmupState   = { running: false, level: 0, zapCount: 0, rotateMins: 0, startedAt: null };
     console.log('✅ [AQUECIMENTO] Agendamento concluído.');
+    await sendAdminNotification(`✅ *Aquecimento agendado concluído*\n\n🕐 ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`);
 };
 
 export default { startWarmup, stopWarmup, startScheduledWarmup, runWarmupFor, isWarmupRunning, getWarmupState, clearOwnerCache, buildPairs };
