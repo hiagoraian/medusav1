@@ -416,7 +416,8 @@ app.post('/webhook/evolution', (req, res) => {
     res.sendStatus(200); // responde imediatamente — nunca atrasa a Evolution API
     const event = req.body;
     if (!event?.event) return;
-    if (event.event !== 'MESSAGES_UPSERT' && event.event !== 'MESSAGES_UPDATE') {
+    if (event.event !== 'MESSAGES_UPSERT' && event.event !== 'MESSAGES_UPDATE' &&
+        event.event !== 'messages.upsert' && event.event !== 'messages.update') {
         console.log(`[WEBHOOK] evento recebido: ${event.event} | instância: ${event.instance}`);
     }
 
