@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as evolution from '../evolution/client.js';
+import { query } from '../database/postgres.js';
 import { processSpintax } from './antiSpam.js';
 import { rotateMobileIPsStaggered, getActiveZteIds } from './networkController.js';
 
@@ -200,19 +201,37 @@ export const clearOwnerCache    = () => _ownerCache.clear();
 export const clearOwnerCacheFor = (accountId) => _ownerCache.delete(accountId);
 
 // ── Conectividade ─────────────────────────────────────────────────────────────
-const isReady = async (accountId) => {
-    try {
-        const state = await evolution.getConnectionState(accountId);
-        return state === 'open';
-    } catch (_) { return false; }
-};
 
+// Uma única chamada à Evolution API para checar todos os zaps — evita 48 requests paralelos
+// que causam timeouts e falsos negativos. Fallback em lotes de 5 se fetchInstances falhar.
 const filterReady = async (accounts) => {
-    const checks = await Promise.all(accounts.map(async id => ({ id, ok: await isReady(id) })));
-    return checks.filter(c => {
-        if (!c.ok) console.warn(`⚠️ [AQUECIMENTO] ${c.id} offline. Removendo.`);
-        return c.ok;
-    }).map(c => c.id);
+    try {
+        const insts  = await evolution.fetchInstances();
+        const openSet = new Set(insts.filter(i => i.connectionStatus === 'open').map(i => i.name));
+        return accounts.filter(id => {
+            const ok = openSet.has(id);
+            if (!ok) console.warn(`⚠️ [AQUECIMENTO] ${id} offline. Removendo.`);
+            return ok;
+        });
+    } catch (_) {
+        // Fallback: lotes de 5 para não saturar a API
+        const ready = [];
+        for (let i = 0; i < accounts.length; i += 5) {
+            const batch = await Promise.allSettled(
+                accounts.slice(i, i + 5).map(async id => {
+                    const state = await evolution.getConnectionState(id).catch(() => 'close');
+                    return { id, ok: state === 'open' };
+                })
+            );
+            batch.forEach(r => {
+                if (r.status === 'fulfilled') {
+                    if (!r.value.ok) console.warn(`⚠️ [AQUECIMENTO] ${r.value.id} offline. Removendo.`);
+                    if (r.value.ok) ready.push(r.value.id);
+                }
+            });
+        }
+        return ready;
+    }
 };
 
 // ── Ping-pong entre um par ────────────────────────────────────────────────────
@@ -361,6 +380,8 @@ export const startWarmup = async (accountsList, level = 2, rotateMins = 0) => {
     const cfg = LEVEL_CONFIG[level] || LEVEL_CONFIG[2];
     _manualRunning = true;
     _warmupState   = { running: true, level, zapCount: withNum.length, rotateMins, startedAt: Date.now() };
+    const _sessionStart   = new Date();
+    const _dailyBefore    = new Map(withNum.map(id => [id, getDaily(id).msgs]));
 
     resetDailyIfNewDay(withNum);
 
@@ -406,6 +427,15 @@ export const startWarmup = async (accountsList, level = 2, rotateMins = 0) => {
     _manualRunning = false;
     _warmupState   = { running: false, level: 0, zapCount: 0, rotateMins: 0, startedAt: null };
     console.log('🛑 [AQUECIMENTO] Parado.');
+
+    const _sessionEnd      = new Date();
+    const _durationMin     = Math.round((_sessionEnd - _sessionStart) / 60000);
+    const _zapsSent        = withNum.filter(id => getDaily(id).msgs > (_dailyBefore.get(id) || 0));
+    query(
+        `INSERT INTO warmup_reports (started_at, ended_at, duration_minutes, zaps_sent)
+         VALUES ($1, $2, $3, $4)`,
+        [_sessionStart, _sessionEnd, _durationMin, _zapsSent]
+    ).catch(e => console.warn('[WARMUP REPORT] Erro ao salvar:', e.message));
 
     const endTime  = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const totalMsg = withNum.reduce((sum, id) => sum + getDaily(id).msgs, 0);

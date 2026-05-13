@@ -40,6 +40,22 @@ export const initSchema = async () => {
         CREATE INDEX IF NOT EXISTS idx_mq_status_id    ON messages_queue(status, id);
         CREATE INDEX IF NOT EXISTS idx_mq_cycle_status ON messages_queue(cycle_id, status);
         CREATE INDEX IF NOT EXISTS idx_mq_phone        ON messages_queue(phone_number);
+
+        CREATE TABLE IF NOT EXISTS warmup_reports (
+            id               SERIAL PRIMARY KEY,
+            started_at       TIMESTAMPTZ NOT NULL,
+            ended_at         TIMESTAMPTZ NOT NULL,
+            duration_minutes INT         NOT NULL,
+            zaps_sent        TEXT[]      NOT NULL DEFAULT '{}'
+        );
+
+        CREATE TABLE IF NOT EXISTS campaign_reports (
+            id          SERIAL PRIMARY KEY,
+            name        TEXT        NOT NULL,
+            started_at  TIMESTAMPTZ NOT NULL,
+            total_sends INT         NOT NULL DEFAULT 0,
+            cycle_id    INT
+        );
     `);
     console.log('✅ [PG] Schema sincronizado.');
 };

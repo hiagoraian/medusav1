@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relatórios - Medusa</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #e5ddd5; margin: 0; padding: 20px; color: #303030; }
+        .container { max-width: 1000px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,.1); }
+        h1 { color: #075e54; border-bottom: 2px solid #25D366; padding-bottom: 10px; margin-top: 0; }
+        .nav { display: flex; gap: 10px; margin-bottom: 24px; }
+        .nav a { padding: 10px 20px; background: #f0f0f0; border-radius: 5px; text-decoration: none; color: #075e54; font-weight: bold; }
+        .nav a:hover { background: #e0e0e0; }
+
+        .tabs { display: flex; gap: 0; border-bottom: 2px solid #25D366; margin-bottom: 24px; }
+        .tab-btn { padding: 10px 28px; background: none; border: none; cursor: pointer; font-size: 15px; font-weight: bold; color: #888; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: .15s; }
+        .tab-btn.active { color: #075e54; border-bottom-color: #25D366; }
+        .tab-btn:hover { color: #075e54; }
+
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { background: #f5f5f5; padding: 10px 14px; text-align: left; color: #555; font-weight: 600; border-bottom: 2px solid #e0e0e0; }
+        td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #fafafa; }
+
+        .zap-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+        .zap-tag { background: #dcf8c6; color: #075e54; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; }
+
+        .empty { text-align: center; color: #aaa; padding: 40px; font-size: 15px; }
+        .loading { text-align: center; color: #aaa; padding: 30px; }
+
+        .stat-big { font-size: 22px; font-weight: bold; color: #075e54; }
+        .date-col { white-space: nowrap; color: #666; font-size: 13px; }
+        .dl-btn { display: inline-block; padding: 4px 10px; border-radius: 5px; font-size: 12px; font-weight: bold; text-decoration: none; margin: 2px; }
+        .dl-inv  { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+        .dl-inv:hover  { background: #ffe0b2; }
+        .dl-fail { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+        .dl-fail:hover { background: #ffcdd2; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📊 Relatórios</h1>
+
+    <div class="nav">
+        <a href="index.html">← Painel</a>
+        <a href="zaps.html">🔌 Gestão de Zaps</a>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('warmup')">🔥 Aquecimento</button>
+        <button class="tab-btn" onclick="switchTab('campaigns')">🚀 Disparos</button>
+    </div>
+
+    <!-- Aba Aquecimento -->
+    <div class="tab-panel active" id="tab-warmup">
+        <div id="warmupContent" class="loading">Carregando...</div>
+    </div>
+
+    <!-- Aba Disparos -->
+    <div class="tab-panel" id="tab-campaigns">
+        <div id="campaignsContent" class="loading">Carregando...</div>
+    </div>
+</div>
+
+<script>
+    function switchTab(tab) {
+        document.querySelectorAll('.tab-btn').forEach((b, i) => {
+            b.classList.toggle('active', (i === 0 && tab === 'warmup') || (i === 1 && tab === 'campaigns'));
+        });
+        document.getElementById('tab-warmup').classList.toggle('active', tab === 'warmup');
+        document.getElementById('tab-campaigns').classList.toggle('active', tab === 'campaigns');
+    }
+
+    function fmtDate(iso) {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadWarmup() {
+        const el = document.getElementById('warmupContent');
+        try {
+            const data = await fetch('/api/reports/warmup').then(r => r.json());
+            if (!data.length) { el.innerHTML = '<div class="empty">Nenhuma sessão de aquecimento registrada ainda.</div>'; return; }
+            el.innerHTML = `
+                <table>
+                    <thead><tr>
+                        <th>Data / Hora</th>
+                        <th>Duração</th>
+                        <th>Zaps que enviaram</th>
+                    </tr></thead>
+                    <tbody>
+                    ${data.map(r => `
+                        <tr>
+                            <td class="date-col">${fmtDate(r.started_at)}</td>
+                            <td>${r.duration_minutes} min</td>
+                            <td>
+                                <div class="zap-tags">
+                                    ${(r.zaps_sent || []).length === 0
+                                        ? '<span style="color:#aaa;font-size:12px;">Nenhum</span>'
+                                        : r.zaps_sent.map(z => `<span class="zap-tag">${z}</span>`).join('')}
+                                </div>
+                            </td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>`;
+        } catch (_) { el.innerHTML = '<div class="empty">Erro ao carregar relatórios.</div>'; }
+    }
+
+    async function loadCampaigns() {
+        const el = document.getElementById('campaignsContent');
+        try {
+            const data = await fetch('/api/reports/campaigns').then(r => r.json());
+            if (!data.length) { el.innerHTML = '<div class="empty">Nenhum disparo registrado ainda.</div>'; return; }
+            el.innerHTML = `
+                <table>
+                    <thead><tr>
+                        <th>Campanha</th>
+                        <th>Data / Hora</th>
+                        <th style="text-align:right;">Total de Envios</th>
+                        <th style="text-align:center;">Downloads</th>
+                    </tr></thead>
+                    <tbody>
+                    ${data.map(r => `
+                        <tr>
+                            <td><b>${r.name}</b></td>
+                            <td class="date-col">${fmtDate(r.started_at)}</td>
+                            <td style="text-align:right;"><span class="stat-big">${r.total_sends.toLocaleString('pt-BR')}</span></td>
+                            <td style="text-align:center;white-space:nowrap;">
+                                ${r.cycle_id ? `
+                                <a href="/api/reports/campaigns/${r.id}/invalidos" class="dl-btn dl-inv">🚫 Inválidos</a>
+                                <a href="/api/reports/campaigns/${r.id}/falhas"    class="dl-btn dl-fail">❌ Falhas</a>
+                                ` : '<span style="color:#ccc;font-size:12px;">—</span>'}
+                            </td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>`;
+        } catch (_) { el.innerHTML = '<div class="empty">Erro ao carregar relatórios.</div>'; }
+    }
+
+    loadWarmup();
+    loadCampaigns();
+</script>
+</body>
+</html>

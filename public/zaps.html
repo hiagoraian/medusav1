@@ -19,9 +19,6 @@
         .btn-secondary { background: #34b7f1; } .btn-secondary:hover { background: #0097d6; }
         .btn-sm { padding: 6px 10px; font-size: 12px; }
 
-        .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-        #statusMsg { font-size: 13px; color: #555; min-height: 20px; margin-bottom: 16px; }
-
         .zap-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 12px; }
         .zap-card { background: #f9f9f9; border: 1px solid #ddd; padding: 16px; border-radius: 8px; text-align: center; }
         .zap-card h3 { margin: 0 0 6px; color: #075e54; font-size: 15px; }
@@ -71,18 +68,11 @@
             <a href="aquecimento.html">🔥 Aquecimento</a>
         </div>
 
-        <div class="actions">
-            <button class="btn" onclick="reconnectAll()">⚡ Reconectar Todos</button>
-            <button class="btn btn-danger" onclick="resetAll()">🗑️ Limpar Todas as Sessões</button>
-        </div>
-        <div id="statusMsg"></div>
-
         <div class="zap-list" id="zapsList"></div>
     </div>
 
 <script>
     let qrPollInterval  = null;
-    let qrRefreshTimer  = null;
     let currentQrAccount = null;
 
     // ── QR Modal ──────────────────────────────────────────────────────────────
@@ -90,55 +80,34 @@
         currentQrAccount = accountId;
         document.getElementById('qrTitle').textContent = `📱 ${accountId}`;
         const content = document.getElementById('qrContent');
-        if (initialQr) {
-            content.innerHTML = `<img src="${initialQr}" alt="QR Code"><p class="qr-status">Aguardando leitura...</p>`;
-        } else {
-            content.innerHTML = `<div class="qr-spinner"></div><p class="qr-status">Gerando QR Code...</p>`;
-        }
+        content.innerHTML = initialQr
+            ? `<img src="${initialQr}" alt="QR Code"><p class="qr-status">Aguardando leitura...</p>`
+            : `<div class="qr-spinner"></div><p class="qr-status">Gerando QR Code...</p>`;
         document.getElementById('qrModal').classList.add('active');
-        startQRPolling(accountId, !initialQr);
+        clearInterval(qrPollInterval);
+        qrPollInterval = setInterval(() => pollQR(accountId), 3000);
     }
 
     function closeQRModal() {
         clearInterval(qrPollInterval);
-        clearInterval(qrRefreshTimer);
-        qrPollInterval = qrRefreshTimer = null;
+        qrPollInterval = null;
         currentQrAccount = null;
         document.getElementById('qrModal').classList.remove('active');
     }
 
-    function startQRPolling(accountId, fetchNow) {
-        clearInterval(qrPollInterval);
-        clearInterval(qrRefreshTimer);
-        // Estado a cada 3s (endpoint leve, não regenera QR)
-        qrPollInterval = setInterval(() => pollState(accountId), 3000);
-        // Rebusca QR a cada 55s (antes do WA expirar o QR em 60s)
-        qrRefreshTimer = setInterval(() => fetchQRCode(accountId), 55000);
-        if (fetchNow) fetchQRCode(accountId);
-    }
-
-    async function pollState(accountId) {
+    async function pollQR(accountId) {
         try {
-            const { state } = await fetch(`/api/whatsapp/state/${accountId}`).then(r => r.json());
-            if (state === 'open') {
-                clearInterval(qrPollInterval);
-                clearInterval(qrRefreshTimer);
-                document.getElementById('qrContent').innerHTML =
-                    `<p style="font-size:48px">✅</p><p class="qr-status" style="color:#075e54">Conectado com sucesso!</p>`;
-                setTimeout(() => { closeQRModal(); refreshStatus(); }, 2000);
-            }
-        } catch (_) {}
-    }
-
-    async function fetchQRCode(accountId) {
-        try {
-            const data = await fetch(`/api/whatsapp/qrcode/${accountId}`).then(r => r.json());
-            if (data.state === 'open') return;
+            const data    = await fetch(`/api/whatsapp/qrcode/${accountId}`).then(r => r.json());
             const content = document.getElementById('qrContent');
+            if (!content) return;
+            if (data.state === 'open') {
+                clearInterval(qrPollInterval);
+                content.innerHTML = `<p style="font-size:48px">✅</p><p class="qr-status" style="color:#075e54">Conectado!</p>`;
+                setTimeout(() => { closeQRModal(); refreshStatus(); }, 2000);
+                return;
+            }
             if (data.qrcode) {
                 content.innerHTML = `<img src="${data.qrcode}" alt="QR Code"><p class="qr-status">Aguardando leitura...</p>`;
-            } else {
-                content.innerHTML = `<div class="qr-spinner"></div><p class="qr-status">Aguardando QR Code...</p>`;
             }
         } catch (_) {}
     }
@@ -159,15 +128,14 @@
 
             if (zap.isAdmin) {
                 card.className = 'zap-card admin-card';
-                const isOpen = zap.state === 'open';
-                const badge   = isOpen ? '👑 Online' : '❌ Offline';
+                const isOpen   = zap.state === 'open';
                 const badgeCls = isOpen ? 'badge-admin' : 'badge-offline';
-                const btn = isOpen
+                const btn      = isOpen
                     ? `<button class="btn btn-danger btn-sm" onclick="deleteZap('${zap.accountId}')">🗑️</button>`
                     : `<button class="btn btn-secondary btn-sm" onclick="connectZap('${zap.accountId}')">📷 Conectar</button>`;
                 card.innerHTML = `
                     <h3>👑 Admin<br><span style="font-size:11px;color:#888">${zap.accountId}</span></h3>
-                    <span class="badge ${badgeCls}">${badge}</span>
+                    <span class="badge ${badgeCls}">${isOpen ? '👑 Online' : '❌ Offline'}</span>
                     <div class="btn-group">${btn}</div>`;
                 container.appendChild(card);
                 return;
@@ -198,7 +166,7 @@
         });
     }
 
-    // ── Ações por zap ─────────────────────────────────────────────────────────
+    // ── Ações ─────────────────────────────────────────────────────────────────
     async function connectZap(accountId) {
         try {
             const data = await fetch('/api/whatsapp/start', {
@@ -206,10 +174,9 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ accountId }),
             }).then(r => r.json());
-
             if (data.connected) { refreshStatus(); return; }
             if (data.error)     { alert(`Erro: ${data.error}`); return; }
-            openQRModal(accountId, data.qrcode || null);
+            openQRModal(accountId, data.base64 || null);
         } catch (_) { alert('Erro ao conectar.'); }
     }
 
@@ -221,39 +188,9 @@
         } catch (_) {}
     }
 
-    // ── Ações globais ─────────────────────────────────────────────────────────
-    async function reconnectAll() {
-        const msg = document.getElementById('statusMsg');
-        msg.textContent = '⏳ Verificando zaps com sessão...';
-        try {
-            const all         = await fetch('/api/zaps-status').then(r => r.json());
-            const toReconnect = all.filter(z => z.hasInstance && z.state !== 'open').map(z => z.accountId);
-            if (!toReconnect.length) { msg.textContent = '✅ Todos os zaps já estão ativos.'; return; }
-            msg.textContent = `⏳ Reconectando ${toReconnect.length} zap(s)...`;
-            await fetch('/api/whatsapp/start-bulk', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ accounts: toReconnect }),
-            });
-            msg.textContent = `⏳ ${toReconnect.length} zap(s) reconectando — aguarde...`;
-            setTimeout(refreshStatus, 15000);
-        } catch (_) { msg.textContent = '❌ Erro ao reconectar.'; }
-    }
-
-    async function resetAll() {
-        if (!confirm('⚠️ ATENÇÃO\n\nIsso vai apagar as sessões de TODOS os 48 zaps.\nVocê precisará escanear o QR Code de cada um novamente.\n\nConfirmar?')) return;
-        const msg = document.getElementById('statusMsg');
-        msg.textContent = '⏳ Limpando todas as sessões...';
-        try {
-            const data = await fetch('/api/whatsapp/reset-all', { method: 'POST' }).then(r => r.json());
-            msg.textContent = data.message || data.error;
-            setTimeout(refreshStatus, 8000);
-        } catch (_) { msg.textContent = '❌ Erro ao limpar sessões.'; }
-    }
-
     // ── Init ──────────────────────────────────────────────────────────────────
     refreshStatus();
-    setInterval(refreshStatus, 15000);
+    setInterval(refreshStatus, 30000);
 </script>
 </body>
 </html>

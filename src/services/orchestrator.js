@@ -2,11 +2,11 @@ import {
     getPendingMessages, countPending, countPendingInCycle,
     assignMessagesToCycle, updateCycleStats, countCycleStats,
 } from './queueService.js';
+import { query } from '../database/postgres.js';
 import { publishBulk, purgeQueues }                                          from '../queue/producer.js';
 import { startWorkers, stopWorkers, requestWorkerStop, resetWorkerStop }     from '../queue/worker.js';
 import { rotateMobileIPsStaggered, getZapsByZte, ZTE_PAIR_ORDER, getActiveZteIds, getZteForAccount, isZteOnline } from './networkController.js';
 import { runWarmupFor }                                                      from './chipWarmup.js';
-import { generateCampaignReport, clearReports }                              from './reportGenerator.js';
 import * as evolution                                                        from '../evolution/client.js';
 
 const SLOT_DURATION_MS = 25 * 60 * 1000;  // 25 min por rodada (24 zaps com 6 sub-grupos)
@@ -58,21 +58,35 @@ const preflightCheck = async (accounts) => {
     const healthy = [];
     const sick    = [];
 
-    await Promise.allSettled(accounts.map(async (id) => {
-        try {
-            const state = await evolution.getConnectionState(id);
-            if (state === 'open') {
+    // Uma única chamada à Evolution API em vez de N chamadas paralelas
+    try {
+        const instances = await evolution.fetchInstances();
+        const openSet   = new Set(
+            instances
+                .filter(i => (i.connectionStatus || i.instance?.state || i.state) === 'open')
+                .map(i => i.instanceName || i.name)
+        );
+        for (const id of accounts) {
+            if (openSet.has(id)) {
                 console.log(`✅ [PREFLIGHT] ${id} OK`);
                 healthy.push(id);
             } else {
-                console.warn(`🔴 [PREFLIGHT] ${id} offline — estado: ${state}`);
+                console.warn(`🔴 [PREFLIGHT] ${id} offline`);
                 sick.push(id);
             }
-        } catch (err) {
-            console.warn(`🔴 [PREFLIGHT] ${id} offline — ${err.message}`);
-            sick.push(id);
         }
-    }));
+    } catch (_) {
+        // Fallback: checagens individuais em batches de 5
+        for (let i = 0; i < accounts.length; i += 5) {
+            await Promise.allSettled(accounts.slice(i, i + 5).map(async (id) => {
+                try {
+                    const state = await evolution.getConnectionState(id);
+                    if (state === 'open') { healthy.push(id); }
+                    else { sick.push(id); }
+                } catch (_) { sick.push(id); }
+            }));
+        }
+    }
 
     if (sick.length === 0) return healthy;
 
@@ -223,14 +237,14 @@ const waitForWaveToFinish = async (cycleId) => {
  * Rotação A→B→C divide a janela em 3 blocos iguais (~3h55 cada).
  */
 export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
-    clearReports();
-
     const {
         startDatetime,
         endDatetime,
-        warmupLevel = 2,
-        testMode    = false,
+        warmupLevel  = 2,
+        testMode     = false,
+        campaignName = 'Sem nome',
     } = config;
+    const _campaignStartedAt = new Date();
 
     const campaignEnd = endDatetime ? new Date(endDatetime) : null;
 
@@ -447,8 +461,15 @@ export const runCampaignLoop = async (activeAccounts, config, cycleId) => {
 
     // ── Finalização ───────────────────────────────────────────────────────────
     if (!stopRequested) {
-        await generateCampaignReport(cycleId).catch(e => console.warn('⚠️ Relatório:', e.message));
         await updateCycleStats(cycleId, 0, 0, 'concluido');
+        try {
+            const stats      = await countCycleStats(cycleId);
+            const totalSends = (stats.enviado || 0) + (stats.invalido || 0);
+            await query(
+                `INSERT INTO campaign_reports (name, started_at, total_sends, cycle_id) VALUES ($1, $2, $3, $4)`,
+                [campaignName, _campaignStartedAt, totalSends, cycleId]
+            );
+        } catch (e) { console.warn('[CAMPAIGN REPORT] Erro ao salvar:', e.message); }
     }
 
     // Não chama resetStop() aqui — stopSignal deve permanecer true até a próxima

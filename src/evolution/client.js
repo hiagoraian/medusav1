@@ -11,7 +11,7 @@ const api = axios.create({
  * @param {string} instanceName
  * @param {object|null} proxyConfig - { host, port } para rotear via 4G, ou null para Wi-Fi
  */
-export const createInstance = async (instanceName, proxyConfig = null, withQR = true, phoneNumber = null) => {
+export const createInstance = async (instanceName, proxyConfig = null, withQR = true, phoneNumber = null, webhookUrl = null) => {
     const body = {
         instanceName,
         qrcode:      withQR,
@@ -23,17 +23,49 @@ export const createInstance = async (instanceName, proxyConfig = null, withQR = 
         body.proxyPort     = String(proxyConfig.port);
         body.proxyProtocol = 'http';
     }
+    // Configura webhook atomicamente na criação — evita race condition onde
+    // o Baileys emite QRCODE_UPDATED antes de setWebhook ser chamado
+    if (webhookUrl) {
+        body.webhook = {
+            enabled:        true,
+            url:            webhookUrl,
+            events:         ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED'],
+            webhookByEvents: false,
+            webhookBase64:   false,
+        };
+    }
     const { data } = await api.post('/instance/create', body);
     return data;
 };
 
-/** Retorna o QR code base64 da instância, ou null se já conectada. */
-export const getQRCode = async (instanceName) => {
+/**
+ * Retorna dados de conexão da instância.
+ * Sem phoneNumber → QR Code via GET /instance/connect/{name} → { base64 }
+ * Com phoneNumber → Pairing Code via POST /instance/pairing-code/{name} → { pairingCode }
+ * Retorna { base64, pairingCode } — apenas um dos dois virá preenchido.
+ */
+export const getConnectData = async (instanceName, phoneNumber = null) => {
     try {
+        if (phoneNumber) {
+            const { data } = await api.post(`/instance/pairing-code/${instanceName}`, {
+                number: phoneNumber.replace(/\D/g, ''),
+            });
+            console.log(`[PAIRING client] ${instanceName} resposta:`, JSON.stringify(data).slice(0, 300));
+            return {
+                base64:      null,
+                pairingCode: data?.pairingCode || data?.code || null,
+            };
+        }
         const { data } = await api.get(`/instance/connect/${instanceName}`);
-        return data?.base64 || data?.qrcode?.base64 || null;
-    } catch (_) {
-        return null;
+        return {
+            base64:      data?.base64 || data?.qrcode?.base64 || null,
+            pairingCode: null,
+        };
+    } catch (err) {
+        if (phoneNumber) {
+            console.error(`[PAIRING client] ${instanceName} erro ${err.response?.status}:`, JSON.stringify(err.response?.data || {}).slice(0, 200));
+        }
+        return { base64: null, pairingCode: null };
     }
 };
 
@@ -181,4 +213,4 @@ export const sendTyping = async (instanceName, number, durationMs = 2000) => {
     } catch (_) {}
 };
 
-export default { createInstance, getQRCode, getConnectionState, fetchInstances, restartInstance, logoutInstance, deleteInstance, sendText, sendMedia, setWebhook, fetchGroups, getMediaBase64, sendAudio, sendTyping, setProxy, clearProxy };
+export default { createInstance, getConnectData, getConnectionState, fetchInstances, restartInstance, logoutInstance, deleteInstance, sendText, sendMedia, setWebhook, fetchGroups, getMediaBase64, sendAudio, sendTyping, setProxy, clearProxy };

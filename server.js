@@ -20,7 +20,6 @@ import {
 import { runCampaignLoop, requestStop }            from './src/services/orchestrator.js';
 import { startWarmup, stopWarmup, startScheduledWarmup, isWarmupRunning, getWarmupState, clearOwnerCacheFor } from './src/services/chipWarmup.js';
 import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount, getStaticProxyForAccount } from './src/services/networkController.js';
-import { generateCampaignReport }                  from './src/services/reportGenerator.js';
 import { notifyAck }                              from './src/services/ackWaiter.js';
 import * as evolution                              from './src/evolution/client.js';
 import {
@@ -53,6 +52,11 @@ const loadIgnoreNumbers = () => {
 // Instâncias atualmente abertas — atualizado pelo webhook CONNECTION_UPDATE
 // Usado para auto-selecionar o zap remetente quando REPLIES_INSTANCE não está definido
 const _connectedInstances = new Set();
+
+// Cache de QR/PairingCode por instância — alimentado via webhook QRCODE_UPDATED.
+// O polling do front-end lê daqui; nunca chama /instance/connect durante o polling.
+// Estrutura: accountId → { base64, pairingCode }
+const qrCache = new Map();
 
 // Números dos próprios zaps — auto-preenchido no startup e atualizável
 let _ownNumbers      = new Set();
@@ -252,12 +256,28 @@ const uploadMedia = multer({
         console.log('🔗 [STARTUP] Configurando ADB...');
         await setupAllAdbForwards();
         await refreshOwnNumbers();
-        // Popula instâncias conectadas para auto-seleção do remetente de replies
+        // Popula estado local a partir da Evolution API
         try {
             const insts = await evolution.fetchInstances();
-            insts.filter(i => (i.connectionStatus || i.instance?.state || i.state) === 'open')
-                 .forEach(i => _connectedInstances.add(i.instanceName || i.name));
-            if (_connectedInstances.size) console.log(`[REPLIES] ${_connectedInstances.size} zap(s) conectados detectados.`);
+
+            // connectionStatus é string direta na v2 ('open' | 'connecting' | 'close')
+            const open       = insts.filter(i => i.connectionStatus === 'open');
+            const connecting = insts.filter(i => i.connectionStatus === 'connecting');
+
+            open.forEach(i => _connectedInstances.add(i.name));
+            if (open.length) console.log(`[STARTUP] ${open.length} zap(s) conectados detectados.`);
+
+            // Pré-popula qrCache para instâncias aguardando leitura após restart
+            if (connecting.length) {
+                console.log(`[STARTUP] ${connecting.length} zap(s) em connecting — pré-populando qrCache...`);
+                for (const inst of connecting) {
+                    const cd = await evolution.getConnectData(inst.name);
+                    if (cd.base64 || cd.pairingCode) {
+                        qrCache.set(inst.name, cd);
+                        console.log(`[STARTUP] qrCache populado: ${inst.name}`);
+                    }
+                }
+            }
         } catch (_) {}
         const cycle = await getInterruptedCycle();
         if (cycle) console.log(`⚠️ [STARTUP] Campanha interrompida detectada (ID: ${cycle.id}).`);
@@ -337,51 +357,49 @@ app.post('/api/whatsapp/start', async (req, res) => {
 
     try {
         const proxyConfig = await getProxyConfigForAccount(accountId);
+        const webhookUrl  = `${WEBHOOK_BASE}/webhook/evolution`;
 
+        qrCache.delete(accountId);
+
+        // ── Fluxo QR Code ─────────────────────────────────────────────────────
         let instanceExisted = false;
         try {
-            await evolution.createInstance(accountId, proxyConfig);
+            await evolution.createInstance(accountId, proxyConfig, true, null, webhookUrl);
         } catch (createErr) {
             const status = createErr.response?.status;
             if (status !== 400 && status !== 403) throw createErr;
-            instanceExisted = true; // 400/403 = já existe
+            instanceExisted = true;
         }
 
-        evolution.setWebhook(accountId, `${WEBHOOK_BASE}/webhook/evolution`)
-            .catch(() => {});
+        evolution.setWebhook(accountId, webhookUrl).catch(() => {});
 
         const state = await evolution.getConnectionState(accountId);
         if (state === 'open') {
             return res.json({ connected: true, message: `${accountId} já está conectado.` });
         }
 
-        // Instância desconectada: limpa sessão expirada para forçar novo QR
-        // Baileys fica em 'close' após reconnect falho — logout reseta o estado
         if (instanceExisted && state === 'close') {
             try { await evolution.logoutInstance(accountId); } catch (_) {}
             await new Promise(r => setTimeout(r, 2000));
         }
 
-        // QR pode levar alguns segundos para ser gerado pelo Baileys
-        let qrcode = await evolution.getQRCode(accountId);
-        if (!qrcode) await new Promise(r => setTimeout(r, 3000));
-        qrcode = qrcode || await evolution.getQRCode(accountId);
+        // Uma chamada inicial para popular o cache; webhook mantém atualizado depois
+        const connectData = await evolution.getConnectData(accountId);
+        if (connectData.base64) qrCache.set(accountId, connectData);
 
-        res.json({ connected: false, qrcode });
+        res.json({ connected: false, ...connectData });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-app.get('/api/whatsapp/qrcode/:accountId', async (req, res) => {
+// Polling do front-end — resposta em <1ms, nunca toca a Evolution API
+app.get('/api/whatsapp/qrcode/:accountId', (req, res) => {
     const { accountId } = req.params;
-    try {
-        const state  = await evolution.getConnectionState(accountId);
-        const qrcode = state === 'open' ? null : await evolution.getQRCode(accountId);
-        res.json({ state, qrcode });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
+    const cached = qrCache.get(accountId) || { base64: null, pairingCode: null };
+    // state local: se está no cache → ainda aguardando leitura; se não → desconhecido
+    const state  = _connectedInstances.has(accountId) ? 'open' : 'waiting';
+    res.json({ state, qrcode: cached.base64, ...cached });
 });
 
 // Endpoint leve — só estado, sem chamar /instance/connect (que regenera QR)
@@ -398,8 +416,22 @@ app.post('/webhook/evolution', (req, res) => {
     res.sendStatus(200); // responde imediatamente — nunca atrasa a Evolution API
     const event = req.body;
     if (!event?.event) return;
+    if (event.event !== 'MESSAGES_UPSERT' && event.event !== 'MESSAGES_UPDATE') {
+        console.log(`[WEBHOOK] evento recebido: ${event.event} | instância: ${event.instance}`);
+    }
 
-    if (event.event === 'CONNECTION_UPDATE') {
+    if (event.event === 'qrcode.updated' || event.event === 'QRCODE_UPDATED') {
+        const instance    = event.instance;
+        const base64      = event.data?.qrcode?.base64 || event.data?.base64 || null;
+        const pairingCode = event.data?.code || event.data?.pairingCode || null;
+        if (instance && (base64 || pairingCode)) {
+            qrCache.set(instance, { base64, pairingCode });
+            console.log(`[QR] ${instance}: cache atualizado — pairingCode=${!!pairingCode} base64=${!!base64}`);
+        }
+        return;
+    }
+
+    if (event.event === 'connection.update' || event.event === 'CONNECTION_UPDATE') {
         const instance = event.instance || event.data?.instance;
         const state    = (event.data || {}).state;
         console.log(`[WEBHOOK] ${instance}: ${state}`);
@@ -407,10 +439,12 @@ app.post('/webhook/evolution', (req, res) => {
             clearOwnerCacheFor(instance);
             if (state === 'open') {
                 _connectedInstances.add(instance);
+                qrCache.delete(instance); // sessão ativa — QR não é mais necessário
                 refreshOwnNumbers().catch(() => {});
             }
             if (state === 'close') {
                 _connectedInstances.delete(instance);
+                qrCache.delete(instance); // sessão encerrada — força novo QR no próximo start
             }
         }
         return;
@@ -726,6 +760,56 @@ app.post('/api/suspend-campaign', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/api/reports/warmup', async (req, res) => {
+    try {
+        const { rows } = await query(
+            `SELECT id, started_at, ended_at, duration_minutes, zaps_sent
+             FROM warmup_reports ORDER BY started_at DESC LIMIT 100`
+        );
+        res.json(rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/reports/campaigns', async (req, res) => {
+    try {
+        const { rows } = await query(
+            `SELECT id, name, started_at, total_sends, cycle_id
+             FROM campaign_reports ORDER BY started_at DESC LIMIT 100`
+        );
+        res.json(rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/reports/campaigns/:id/invalidos', async (req, res) => {
+    try {
+        const { rows: cr } = await query(`SELECT cycle_id, name FROM campaign_reports WHERE id = $1`, [req.params.id]);
+        if (!cr.length || !cr[0].cycle_id) return res.status(404).send('Campanha não encontrada.');
+        const { rows } = await query(
+            `SELECT phone_number FROM messages_queue WHERE cycle_id = $1 AND status = 'invalido' ORDER BY id`,
+            [cr[0].cycle_id]
+        );
+        const filename = `invalidos_${cr[0].name.replace(/[^a-zA-Z0-9]/g, '_')}.txt`;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(rows.map(r => r.phone_number).join('\n'));
+    } catch (err) { res.status(500).send(err.message); }
+});
+
+app.get('/api/reports/campaigns/:id/falhas', async (req, res) => {
+    try {
+        const { rows: cr } = await query(`SELECT cycle_id, name FROM campaign_reports WHERE id = $1`, [req.params.id]);
+        if (!cr.length || !cr[0].cycle_id) return res.status(404).send('Campanha não encontrada.');
+        const { rows } = await query(
+            `SELECT phone_number, error_message FROM messages_queue WHERE cycle_id = $1 AND status = 'falha' ORDER BY id`,
+            [cr[0].cycle_id]
+        );
+        const filename = `falhas_${cr[0].name.replace(/[^a-zA-Z0-9]/g, '_')}.txt`;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(rows.map(r => `${r.phone_number}${r.error_message ? ' | ' + r.error_message : ''}`).join('\n'));
+    } catch (err) { res.status(500).send(err.message); }
+});
+
 app.post('/api/clear-dashboard', async (req, res) => {
     try {
         requestStop();
@@ -751,8 +835,9 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
             accounts, messageText, mediaMode,
             startDatetime,
             endDatetime,
-            warmupLevel = '2',
-            testMode    = 'false',
+            warmupLevel  = '2',
+            testMode     = 'false',
+            campaignName = 'Sem nome',
         } = req.body;
 
         const activeAccountsList = JSON.parse(accounts);
@@ -794,8 +879,9 @@ app.post('/api/start-campaign', uploadMedia.single('mediaFile'), async (req, res
             mediaMode:      mediaMode      || 'caption',
             startDatetime:  startDatetime  || null,
             endDatetime:    endDatetime    || null,
-            warmupLevel: parseInt(warmupLevel),
+            warmupLevel:    parseInt(warmupLevel),
             testMode:       testMode === 'true',
+            campaignName:   campaignName   || 'Sem nome',
         };
 
         (async () => {
@@ -1043,30 +1129,6 @@ app.post('/api/setup-webhooks', async (req, res) => {
             connected.map(i => evolution.setWebhook(i.instanceName || i.name, url))
         );
         res.json({ message: `✅ Webhooks configurados em ${connected.length} zap(s).` });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// ── Relatórios ────────────────────────────────────────────────────────────────
-
-// Gera/regenera e faz download dos relatórios da última campanha
-app.get('/api/report/enviados',  (req, res) => serveReport(res, 'enviados.txt'));
-app.get('/api/report/invalidos', (req, res) => serveReport(res, 'invalidos.txt'));
-app.get('/api/report/falhas',    (req, res) => serveReport(res, 'falhas.txt'));
-
-const serveReport = (res, filename) => {
-    const filePath = path.join(__dirname, 'reports', filename);
-    if (!fs.existsSync(filePath))
-        return res.status(404).json({ error: 'Relatório ainda não gerado.' });
-    res.download(filePath);
-};
-
-// Dispara regeneração manual do relatório de um cycle
-app.post('/api/report/generate/:cycleId', async (req, res) => {
-    try {
-        await generateCampaignReport(parseInt(req.params.cycleId));
-        res.json({ message: '✅ Relatórios gerados em reports/' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

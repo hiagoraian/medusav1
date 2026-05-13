@@ -101,6 +101,11 @@
     <div class="modal-box">
         <h2 id="modalPreviewTitle" style="color:#075e54;">📋 Plano de Disparo</h2>
         <table class="preview-table" id="previewTable"></table>
+        <div style="margin:14px 0 4px;">
+            <label style="font-size:13px;font-weight:bold;color:#555;display:block;margin-bottom:4px;">Nome da Campanha</label>
+            <input type="text" id="campaignNameInput" placeholder="Ex: Black Friday - Lista A"
+                   style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+        </div>
         <div class="btn-group">
             <button class="btn btn-danger" style="flex:0.6;" onclick="closePreview()">Cancelar</button>
             <button class="btn" id="modalConfirmBtn" onclick="confirmStart()">🚀 Confirmar e Iniciar</button>
@@ -115,6 +120,7 @@
         <a href="zaps.html">🔌 Gestão de Zaps</a>
         <a href="aquecimento.html">🔥 Aquecimento</a>
         <a href="listas.html">📋 Gestão de Listas</a>
+        <a href="relatorios.html">📊 Relatórios</a>
     </div>
 
     <!-- Dashboard -->
@@ -133,19 +139,9 @@
         <div class="progress-container"><div class="progress-bar" id="progressBar"></div></div>
     </div>
 
-    <!-- Relatórios -->
-    <div class="section" style="padding:14px 20px;">
-        <h2 style="margin-bottom:10px;">📄 Relatórios</h2>
-        <div class="btn-group" style="margin-top:0;">
-            <button class="btn btn-secondary btn-sm" onclick="downloadReport('enviados')">✅ Enviados.txt</button>
-            <button class="btn btn-secondary btn-sm" onclick="downloadReport('invalidos')">🚫 Inválidos.txt</button>
-            <button class="btn btn-danger    btn-sm" onclick="downloadReport('falhas')">❌ Falhas Técnicas.txt</button>
-        </div>
-    </div>
-
     <!-- 1. Listas -->
     <div class="section">
-        <h2>1. Gerenciador de Listas <a href="/listas.html" style="font-size:12px;font-weight:normal;color:#3949ab;margin-left:10px;">📋 Gestão de Listas →</a></h2>
+        <h2>1. Gerenciador de Listas</h2>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <label class="btn btn-secondary" style="cursor:pointer;width:auto;padding:10px 20px;font-size:14px;">
                 📁 Adicionar Arquivos (.xlsx)
@@ -316,13 +312,13 @@
 
     async function verifyZapsNow() {
         const btn = document.getElementById('btnVerifyZaps');
-        btn.textContent = '⏳ Verificando (até 35s)...';
+        btn.textContent = '⏳ Verificando...';
         btn.disabled    = true;
         try {
-            const data = await (await fetch('/api/zaps-deep-check', { signal: AbortSignal.timeout(45000) })).json();
+            const data = await fetch('/api/zaps-status').then(r => r.json());
             data.forEach(zap => {
-                zapStatusMap[zap.accountId] = zap.deepState === 'confirmed';
-                updateZapBadge(zap.accountId, zap.deepState, zap.state);
+                zapStatusMap[zap.accountId] = zap.connected;
+                updateZapBadge(zap.accountId, zap.state);
             });
             updateZapSummary();
             updatePreviewInfo();
@@ -494,16 +490,13 @@
     document.querySelectorAll('.zap-cb').forEach(cb => cb.addEventListener('change', updatePreviewInfo));
 
     // ── Zap status ────────────────────────────────────────────────────────────
-    function updateZapBadge(accountId, deepState, state) {
+    function updateZapBadge(accountId, state) {
         const badge = document.getElementById(`badge-${accountId}`);
         if (!badge) return;
         let text, cls;
-        if      (deepState === 'confirmed')                                   { text = '✅ Ativo';    cls = 'zap-s-on';   }
-        else if (deepState === 'needs_qr')                                    { text = '🟠 Expirado'; cls = 'zap-s-zomb'; }
-        else if (deepState === 'disconnected' || deepState === 'no_instance') { text = '❌ Off';      cls = 'zap-s-off';  }
-        else if (state === 'open')                                            { text = '✅ Ativo';    cls = 'zap-s-on';   }
-        else if (state === 'connecting')                                      { text = '⏳';          cls = 'zap-s-conn'; }
-        else                                                                  { text = '❌ Off';      cls = 'zap-s-off';  }
+        if      (state === 'open')       { text = '✅ Ativo'; cls = 'zap-s-on';   }
+        else if (state === 'connecting') { text = '⏳';       cls = 'zap-s-conn'; }
+        else                             { text = '❌ Off';   cls = 'zap-s-off';  }
         badge.textContent = text;
         badge.className   = `zap-status-badge ${cls}`;
     }
@@ -512,9 +505,8 @@
         try {
             const data = await (await fetch('/api/zaps-status')).json();
             data.forEach(zap => {
-                // deepState vem do servidor (zombie persistente) — sem cache no browser
                 zapStatusMap[zap.accountId] = zap.connected;
-                updateZapBadge(zap.accountId, zap.deepState, zap.state);
+                updateZapBadge(zap.accountId, zap.state);
             });
             updateZapSummary();
             updatePreviewInfo();
@@ -682,6 +674,8 @@
     async function confirmStart() {
         if (!pendingFormData) return;
         const isTest = pendingFormData.get('testMode') === 'true';
+        const name   = (document.getElementById('campaignNameInput')?.value || '').trim() || 'Sem nome';
+        pendingFormData.set('campaignName', name);
         document.getElementById('modalPreview').classList.remove('active');
 
         try {
