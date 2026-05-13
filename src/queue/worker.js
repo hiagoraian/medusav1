@@ -2,7 +2,6 @@ import amqplib from 'amqplib';
 import * as evolution from '../evolution/client.js';
 import { updateMessageStatus } from '../services/queueService.js';
 import { processSpintax, humanDelay } from '../services/antiSpam.js';
-import { waitForAck } from '../services/ackWaiter.js';
 
 const RABBITMQ_URL      = process.env.RABBITMQ_URL || 'amqp://medusa:medusa@localhost:5672';
 const ORPHAN_THRESHOLD  = 5; // falhas offline consecutivas antes de drenar
@@ -112,8 +111,6 @@ export const startWorkers = async (activeAccounts, campaignConfig) => {
         let isFirstMessage  = true;
         let offlineStreak   = 0;
         let sendErrorStreak = 0;  // 500/400 consecutivos mesmo com estado 'open'
-        let noAckStreak     = 0;  // mensagens enviadas (200 ok) sem SERVER_ACK do WA
-        let pendingAck      = null; // { promise, phone } da mensagem anterior
         let orphaned        = false;
 
         // Ref para o tag — preenchida após ch.consume() retornar
@@ -185,38 +182,6 @@ export const startWorkers = async (activeAccounts, campaignConfig) => {
                     return;
                 }
 
-                // ── Verifica ACK da mensagem anterior (ghost send detection) ─────
-                // O delay humano já passou — se o WA não confirmou nesse tempo, é ghost.
-                if (pendingAck) {
-                    const acked = await pendingAck.promise;
-                    if (!acked) {
-                        noAckStreak++;
-                        console.warn(`👻 [${accountId}] Ghost send detectado (${noAckStreak}/${ORPHAN_THRESHOLD}): ${pendingAck.phone} — sem confirmação do WA`);
-                        if (noAckStreak >= ORPHAN_THRESHOLD) {
-                            orphaned = true;
-                            console.error(`🔴 [${accountId}] ${ORPHAN_THRESHOLD} ghost sends consecutivos. Declarado órfão.`);
-                            try { ch.ack(msg); } catch (_) {}
-                            setImmediate(async () => {
-                                try {
-                                    try { await ch.cancel(consumerRef.tag); } catch (_) {}
-                                    await drainOrphanQueue(ch, queue, campaignConfig.cycleId, accountId, 'Ghost sends consecutivos — órfão');
-                                    try { await ch.close(); } catch (_) {}
-                                    delete consumerTags[accountId];
-                                } catch (_) {}
-                            });
-                            return;
-                        }
-                    } else {
-                        noAckStreak = 0;
-                    }
-                    pendingAck = null;
-                }
-
-                if (stopSignal) {
-                    ch.nack(msg, false, true);
-                    return;
-                }
-
                 console.log(`🚀 [${accountId}] Disparando para ${task.phone}...`);
                 const result = await sendMessage(accountId, task.phone, campaignConfig);
                 await updateMessageStatus(task.messageId, result.status, accountId, campaignConfig.cycleId, result.error || null);
@@ -224,9 +189,6 @@ export const startWorkers = async (activeAccounts, campaignConfig) => {
                 if (result.status === 'enviado') {
                     console.log(`✅ [${accountId}] Enviado: ${task.phone}`);
                     sendErrorStreak = 0;
-                    // Registra ACK waiter para a mensagem atual — verificado na próxima iteração
-                    const keyId = result.keyId;
-                    if (keyId) pendingAck = { promise: waitForAck(keyId, 60_000), phone: task.phone };
                 } else if (result.status === 'invalido') {
                     console.log(`🚫 [${accountId}] Inválido: ${task.phone}`);
                     sendErrorStreak = 0;

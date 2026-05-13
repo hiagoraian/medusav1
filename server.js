@@ -20,7 +20,6 @@ import {
 import { runCampaignLoop, requestStop }            from './src/services/orchestrator.js';
 import { startWarmup, stopWarmup, startScheduledWarmup, isWarmupRunning, getWarmupState, clearOwnerCacheFor } from './src/services/chipWarmup.js';
 import { checkAllDevicesStatus, setupAllAdbForwards, getProxyConfigForAccount, getStaticProxyForAccount } from './src/services/networkController.js';
-import { notifyAck }                              from './src/services/ackWaiter.js';
 import * as evolution                              from './src/evolution/client.js';
 import {
     getAllLists, readListPhones, writeListPhones,
@@ -449,20 +448,6 @@ app.post('/webhook/evolution', (req, res) => {
             }
         }
         return;
-    }
-
-    // Confirma ACKs para o preflight check (SERVER_ACK ou superior)
-    if (event.event === 'messages.update' || event.event === 'MESSAGES_UPDATE') {
-        const updates = Array.isArray(event.data) ? event.data : [event.data];
-        for (const upd of updates) {
-            const fromMe = upd?.key?.fromMe ?? upd?.fromMe;
-            const keyId  = upd?.key?.id     || upd?.keyId;
-            const status = upd?.update?.status ?? upd?.status;
-            const isAcked = status >= 2 || status === 'SERVER_ACK' || status === 'DELIVERY_ACK' || status === 'READ';
-            if (fromMe && keyId && isAcked) {
-                notifyAck(keyId);
-            }
-        }
     }
 
     if (event.event === 'MESSAGES_UPSERT' || event.event === 'messages.upsert') {
